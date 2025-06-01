@@ -1,0 +1,15 @@
+# Local development files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Build artifacts
+.next
+out
+
+# Dependencies
+node_modules
+
+# Logs
+*.log
