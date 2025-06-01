@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 255, 255, 255;
+  --background-start-rgb: 10, 10, 10;
+  --background-end-rgb: 0, 0, 0;
+  --accent-green: 30, 235, 75;
+  --accent-red: 255, 51, 51;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: linear-gradient(
+      to bottom,
+      transparent,
+      rgb(var(--background-end-rgb))
+    )
+    rgb(var(--background-start-rgb));
+}
+
+/* Shadowrun Barren theme specific styles */
+.sr-terminal {
+  font-family: 'Courier New', monospace;
+  border: 1px solid rgb(var(--accent-red), 0.3);
+}
+
+.sr-prompt {
+  color: rgb(var(--accent-green));
+}
+
+.sr-accent {
+  color: rgb(var(--accent-red));
+}
+
+/* Animation for streaming text */
+@keyframes blink {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+
+.streaming-cursor {
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  background-color: rgb(var(--accent-green));
+  animation: blink 1s infinite;
+}
