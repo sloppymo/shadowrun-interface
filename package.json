@@ -9,13 +9,14 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@clerk/nextjs": "^4.31.8",
+    "@clerk/nextjs": "^6.20.2",
     "@tanstack/react-query": "^4.36.1",
     "axios": "^1.6.2",
-    "next": "13.5.7",
-    "react": "18.2.0",
-    "react-dom": "18.2.0",
-    "typescript": "5.2.2"
+    "next": "14.2.9",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "5.2.2",
+    "ws": "^8.14.2"
   },
   "devDependencies": {
     "@types/node": "20.9.0",
