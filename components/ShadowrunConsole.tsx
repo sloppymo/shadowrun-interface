@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useUser } from '@clerk/nextjs';
+import DmDashboard from './DmDashboard';
+import axios from 'axios';
 
 // Define types
 type ThemeName = 'shadowrunBarren' | 'matrix' | 'cyberpunk' | 'terminal';
@@ -92,6 +94,9 @@ export default function ShadowrunConsole() {
   const [prompt, setPrompt] = useState('> ');
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showDmDashboard, setShowDmDashboard] = useState(false);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [isGameMaster, setIsGameMaster] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const consoleRef = useRef<HTMLDivElement>(null);
   
@@ -149,6 +154,92 @@ export default function ShadowrunConsole() {
     setHistory(prev => [...prev, { command, output, isProcessing, isStreaming }]);
   };
 
+  // Handle session management commands
+  const handleSessionCommand = async (cmd: string) => {
+    const parts = cmd.split(' ');
+    const action = parts[1];
+    const argument = parts.slice(2).join(' ');
+
+    if (action === 'create') {
+      if (!argument) {
+        addToHistory(cmd, 'Error: Session name is required. Usage: /session create [name]', false);
+        return;
+      }
+      
+      try {
+        const response = await axios.post('http://localhost:5000/api/session', {
+          name: argument,
+          gm_user_id: user?.id
+        });
+        
+        setCurrentSessionId(response.data.session_id);
+        setIsGameMaster(true);
+        addToHistory(cmd, `Session "${argument}" created successfully!\nSession ID: ${response.data.session_id}\nYou are the Game Master.`, false);
+      } catch (error) {
+        addToHistory(cmd, `Error creating session: ${error instanceof Error ? error.message : 'Unknown error'}`, false);
+      }
+    } else if (action === 'join') {
+      if (!argument) {
+        addToHistory(cmd, 'Error: Session ID is required. Usage: /session join [id]', false);
+        return;
+      }
+      
+      try {
+        await axios.post(`http://localhost:5000/api/session/${argument}/join`, {
+          user_id: user?.id,
+          role: 'player'
+        });
+        
+        setCurrentSessionId(argument);
+        setIsGameMaster(false);
+        addToHistory(cmd, `Joined session ${argument} as a player.`, false);
+      } catch (error) {
+        addToHistory(cmd, `Error joining session: ${error instanceof Error ? error.message : 'Unknown error'}`, false);
+      }
+    } else {
+      addToHistory(cmd, 'Error: Invalid session command. Use /session create [name] or /session join [id]', false);
+    }
+  };
+
+  // Handle AI command with DM review
+  const handleAiCommand = async (cmd: string) => {
+    const context = cmd.substring(4).trim();
+    
+    if (!context) {
+      addToHistory(cmd, 'Error: Please provide a message for the AI. Usage: /ai [your message]', false);
+      return;
+    }
+    
+    if (!currentSessionId) {
+      addToHistory(cmd, 'Error: You must be in a session to use AI features.', false);
+      return;
+    }
+    
+    try {
+      const response = await axios.post(`http://localhost:5000/api/session/${currentSessionId}/llm-with-review`, {
+        user_id: user?.id,
+        context: context,
+        response_type: 'narrative',
+        priority: 1,
+        require_review: !isGameMaster // GM responses don't need review
+      });
+      
+      if (response.data.status === 'pending_review') {
+        addToHistory(cmd, 
+          `AI response generated and sent for DM review.\n` +
+          `Request ID: ${response.data.pending_response_id}\n` +
+          `You will be notified when the DM approves your response.`, 
+          false
+        );
+      } else {
+        // Direct response (GM bypass)
+        addToHistory(cmd, response.data.choices?.[0]?.message?.content || 'AI response received.', false);
+      }
+    } catch (error) {
+      addToHistory(cmd, `Error getting AI response: ${error instanceof Error ? error.message : 'Unknown error'}`, false);
+    }
+  };
+
   // Handle form submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -185,6 +276,10 @@ export default function ShadowrunConsole() {
           '- help: Show this help message\n' +
           '- theme [name]: Change console theme (shadowrunBarren, matrix, cyberpunk, terminal)\n' +
           '- settings: Open settings panel\n' +
+          '- /session create [name]: Create a new game session (GM only)\n' +
+          '- /session join [id]: Join an existing session\n' +
+          '- /dm dashboard: Open DM review dashboard (GM only)\n' +
+          '- /ai [message]: Request AI response with DM review\n' +
           '- /scene [description]: Set a new scene\n' +
           '- /roll [dice]: Roll dice (e.g., /roll 3d6)\n' +
           '- /summon [character]: Summon an NPC\n' +
@@ -207,6 +302,26 @@ export default function ShadowrunConsole() {
       else if (command === 'settings') {
         setShowSettings(true);
         addToHistory(cmd, 'Opening settings panel...', false);
+      }
+      
+      // DM Review System Commands
+      else if (command.startsWith('/session ')) {
+        await handleSessionCommand(cmd);
+      }
+      
+      else if (command === '/dm dashboard') {
+        if (!isGameMaster) {
+          addToHistory(cmd, 'Error: Only Game Masters can access the DM dashboard.', false);
+        } else if (!currentSessionId) {
+          addToHistory(cmd, 'Error: You must be in a session to access the DM dashboard.', false);
+        } else {
+          setShowDmDashboard(true);
+          addToHistory(cmd, 'Opening DM Review Dashboard...', false);
+        }
+      }
+      
+      else if (command.startsWith('/ai ')) {
+        await handleAiCommand(cmd);
       }
       
       // Shadowrun specific commands
@@ -336,6 +451,15 @@ export default function ShadowrunConsole() {
             </div>
           </div>
         </div>
+      )}
+      
+      {/* DM Dashboard */}
+      {showDmDashboard && currentSessionId && (
+        <DmDashboard
+          sessionId={currentSessionId}
+          isVisible={showDmDashboard}
+          onClose={() => setShowDmDashboard(false)}
+        />
       )}
     </div>
   );
