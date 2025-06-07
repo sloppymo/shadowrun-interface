@@ -1,1 +1,0 @@
-exports.id=913,exports.ids=[913],exports.modules={5913:(e,r,t)=>{"use strict";t.r(r),t.d(r,{default:()=>__WEBPACK_DEFAULT_EXPORT__});var s=t(997);t(6764);var _=t(3300),d=t(1163);let __WEBPACK_DEFAULT_EXPORT__=function({Component:e,pageProps:r}){let t=(0,d.useRouter)();return"/test"===t.pathname?s.jsx(e,{...r}):s.jsx(_.ClerkProvider,{...r,children:s.jsx(e,{...r})})}},6764:()=>{}};

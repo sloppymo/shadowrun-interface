@@ -1,14 +1,1 @@
-{
-  "/_app": "pages/_app.js",
-  "/_error": "pages/_error.js",
-  "/console": "pages/console.js",
-  "/dashboard": "pages/dashboard.js",
-  "/dice-roller": "pages/dice-roller.js",
-  "/enhanced-console": "pages/enhanced-console.js",
-  "/enhanced-dashboard": "pages/enhanced-dashboard.js",
-  "/": "pages/index.js",
-  "/sign-in/[[...index]]": "pages/sign-in/[[...index]].js",
-  "/sign-up/[[...index]]": "pages/sign-up/[[...index]].js",
-  "/test": "pages/test.js",
-  "/_document": "pages/_document.js"
-}
+{"/_app":"pages/_app.js","/_error":"pages/_error.js","/console":"pages/console.html","/dashboard":"pages/dashboard.html","/dice-roller":"pages/dice-roller.html","/enhanced-console":"pages/enhanced-console.html","/enhanced-dashboard":"pages/enhanced-dashboard.html","/":"pages/index.html","/sign-in/[[...index]]":"pages/sign-in/[[...index]].html","/sign-up/[[...index]]":"pages/sign-up/[[...index]].html","/test":"pages/test.html","/_document":"pages/_document.js","/404":"pages/404.html"}
