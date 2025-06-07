@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useUser } from '@clerk/nextjs';
 import axios from 'axios';
 
@@ -20,6 +20,38 @@ interface DmNotification {
   created_at: string;
 }
 
+interface Pagination {
+  page: number;
+  per_page: number;
+  total: number;
+  pages: number;
+  has_next: boolean;
+  has_prev: boolean;
+}
+
+interface PendingResponsesData {
+  items: PendingResponse[];
+  pagination: Pagination;
+}
+
+interface Analytics {
+  queue_status: {
+    pending_count: number;
+    high_priority_count: number;
+  };
+  review_stats: {
+    total_reviewed: number;
+    approved_count: number;
+    rejected_count: number;
+    edited_count: number;
+    approval_rate: number;
+    avg_review_time_minutes: number;
+  };
+  notifications: {
+    unread_count: number;
+  };
+}
+
 interface DmDashboardProps {
   sessionId: string;
   isVisible: boolean;
@@ -30,28 +62,96 @@ const API_BASE_URL = 'http://localhost:5000';
 
 export default function DmDashboard({ sessionId, isVisible, onClose }: DmDashboardProps) {
   const { user } = useUser();
-  const [pendingResponses, setPendingResponses] = useState<PendingResponse[]>([]);
+  const [pendingResponsesData, setPendingResponsesData] = useState<PendingResponsesData>({
+    items: [],
+    pagination: { page: 1, per_page: 20, total: 0, pages: 0, has_next: false, has_prev: false }
+  });
   const [notifications, setNotifications] = useState<DmNotification[]>([]);
+  const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [selectedResponse, setSelectedResponse] = useState<PendingResponse | null>(null);
+  const [selectedResponses, setSelectedResponses] = useState<Set<string>>(new Set());
   const [editedResponse, setEditedResponse] = useState('');
   const [dmNotes, setDmNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'pending' | 'notifications'>('pending');
+  type TabType = 'pending' | 'notifications' | 'analytics';
+  const [activeTab, setActiveTab] = useState<TabType>('pending');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [priorityFilter, setPriorityFilter] = useState<number | null>(null);
+  const [responseTypeFilter, setResponseTypeFilter] = useState<string>('');
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Real-time polling
+  const startPolling = useCallback(() => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = setInterval(() => {
+      if (isVisible && user) {
+        fetchPendingResponses();
+        fetchNotifications();
+        fetchAnalytics();
+      }
+    }, 5000); // Poll every 5 seconds
+  }, [isVisible, user, sessionId, currentPage, priorityFilter, responseTypeFilter]);
+
+  const stopPolling = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (isVisible && user) {
       fetchPendingResponses();
       fetchNotifications();
+      fetchAnalytics();
+      startPolling();
+    } else {
+      stopPolling();
     }
-  }, [isVisible, user, sessionId]);
+
+    return () => stopPolling();
+  }, [isVisible, user, sessionId, currentPage, priorityFilter, responseTypeFilter, startPolling, stopPolling]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (!isVisible || !selectedResponse) return;
+
+      if (e.key === 'a' && e.altKey) {
+        e.preventDefault();
+        handleReview('approve');
+      } else if (e.key === 'r' && e.altKey) {
+        e.preventDefault();
+        handleReview('reject');
+      } else if (e.key === 'e' && e.altKey) {
+        e.preventDefault();
+        handleReview('edit');
+      } else if (e.key === 'Escape') {
+        setSelectedResponse(null);
+        setSelectedResponses(new Set());
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [isVisible, selectedResponse]);
 
   const fetchPendingResponses = async () => {
     try {
       setIsLoading(true);
+      const params = new URLSearchParams({
+        user_id: user?.id || '',
+        page: currentPage.toString(),
+        per_page: '20'
+      });
+
+      if (priorityFilter) params.append('priority', priorityFilter.toString());
+      if (responseTypeFilter) params.append('response_type', responseTypeFilter);
+
       const response = await axios.get(
-        `${API_BASE_URL}/api/session/${sessionId}/pending-responses?user_id=${user?.id}`
+        `${API_BASE_URL}/api/session/${sessionId}/pending-responses?${params}`
       );
-      setPendingResponses(response.data);
+      setPendingResponsesData(response.data);
     } catch (error) {
       console.error('Error fetching pending responses:', error);
     } finally {
@@ -67,6 +167,17 @@ export default function DmDashboard({ sessionId, isVisible, onClose }: DmDashboa
       setNotifications(response.data);
     } catch (error) {
       console.error('Error fetching notifications:', error);
+    }
+  };
+
+  const fetchAnalytics = async () => {
+    try {
+      const response = await axios.get(
+        `${API_BASE_URL}/api/session/${sessionId}/dm/analytics?user_id=${user?.id}`
+      );
+      setAnalytics(response.data);
+    } catch (error) {
+      console.error('Error fetching analytics:', error);
     }
   };
 
@@ -88,6 +199,7 @@ export default function DmDashboard({ sessionId, isVisible, onClose }: DmDashboa
       // Refresh data
       await fetchPendingResponses();
       await fetchNotifications();
+      await fetchAnalytics();
       
       // Clear selection
       setSelectedResponse(null);
@@ -100,6 +212,36 @@ export default function DmDashboard({ sessionId, isVisible, onClose }: DmDashboa
     }
   };
 
+  const handleBulkReview = async (action: 'approve' | 'reject') => {
+    if (selectedResponses.size === 0 || !user) return;
+
+    try {
+      setIsLoading(true);
+      await axios.post(
+        `${API_BASE_URL}/api/session/${sessionId}/pending-responses/bulk`,
+        {
+          user_id: user.id,
+          action,
+          response_ids: Array.from(selectedResponses),
+          dm_notes: dmNotes
+        }
+      );
+
+      // Refresh data
+      await fetchPendingResponses();
+      await fetchNotifications();
+      await fetchAnalytics();
+      
+      // Clear selections
+      setSelectedResponses(new Set());
+      setDmNotes('');
+    } catch (error) {
+      console.error('Error bulk reviewing responses:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const markNotificationRead = async (notificationId: number) => {
     try {
       await axios.post(
@@ -107,8 +249,27 @@ export default function DmDashboard({ sessionId, isVisible, onClose }: DmDashboa
         { user_id: user?.id }
       );
       await fetchNotifications();
+      await fetchAnalytics();
     } catch (error) {
       console.error('Error marking notification as read:', error);
+    }
+  };
+
+  const toggleResponseSelection = (responseId: string) => {
+    const newSelected = new Set(selectedResponses);
+    if (newSelected.has(responseId)) {
+      newSelected.delete(responseId);
+    } else {
+      newSelected.add(responseId);
+    }
+    setSelectedResponses(newSelected);
+  };
+
+  const selectAllResponses = () => {
+    if (selectedResponses.size === pendingResponsesData.items.length) {
+      setSelectedResponses(new Set());
+    } else {
+      setSelectedResponses(new Set(pendingResponsesData.items.map(r => r.id)));
     }
   };
 
@@ -157,7 +318,7 @@ export default function DmDashboard({ sessionId, isVisible, onClose }: DmDashboa
             }`}
             onClick={() => setActiveTab('pending')}
           >
-            PENDING RESPONSES ({pendingResponses.length})
+            PENDING RESPONSES ({pendingResponsesData.items.length})
           </button>
           <button
             className={`px-4 py-2 font-mono ${
@@ -169,64 +330,171 @@ export default function DmDashboard({ sessionId, isVisible, onClose }: DmDashboa
           >
             NOTIFICATIONS ({notifications.length})
           </button>
+          <button
+            className={`px-4 py-2 font-mono ${
+              activeTab === 'analytics' 
+                ? 'text-green-400 border-b-2 border-green-400' 
+                : 'text-gray-400 hover:text-green-400'
+            }`}
+            onClick={() => setActiveTab('analytics')}
+          >
+            ANALYTICS
+          </button>
         </div>
 
         {/* Pending Responses Tab */}
         {activeTab === 'pending' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Pending Responses List */}
-            <div>
-              <h3 className="text-lg font-mono mb-4 text-yellow-400">PENDING REVIEWS</h3>
+          <div className="space-y-6">
+            {/* Filters and Controls */}
+            <div className="bg-gray-800 p-4 rounded border border-gray-600">
+              <div className="flex flex-wrap gap-4 items-center justify-between">
+                <div className="flex gap-4 items-center">
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">PRIORITY FILTER</label>
+                    <select
+                      value={priorityFilter || ''}
+                      onChange={(e) => {
+                        setPriorityFilter(e.target.value ? parseInt(e.target.value) : null);
+                        setCurrentPage(1);
+                      }}
+                      className="bg-gray-700 text-green-400 p-2 rounded border border-gray-600 text-sm"
+                    >
+                      <option value="">ALL</option>
+                      <option value="3">HIGH</option>
+                      <option value="2">MEDIUM</option>
+                      <option value="1">LOW</option>
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">TYPE FILTER</label>
+                    <select
+                      value={responseTypeFilter}
+                      onChange={(e) => {
+                        setResponseTypeFilter(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      className="bg-gray-700 text-green-400 p-2 rounded border border-gray-600 text-sm"
+                    >
+                      <option value="">ALL TYPES</option>
+                      <option value="narrative">NARRATIVE</option>
+                      <option value="dice_roll">DICE ROLL</option>
+                      <option value="npc_action">NPC ACTION</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Bulk Operations */}
+                {selectedResponses.size > 0 && (
+                  <div className="flex gap-2 items-center">
+                    <span className="text-sm text-gray-400">
+                      {selectedResponses.size} selected
+                    </span>
+                    <button
+                      onClick={() => handleBulkReview('approve')}
+                      className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded"
+                    >
+                      Bulk Approve
+                    </button>
+                    <button
+                      onClick={() => handleBulkReview('reject')}
+                      className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm rounded"
+                    >
+                      Bulk Reject
+                    </button>
+                  </div>
+                )}
+              </div>
+              
+              {/* Keyboard Shortcuts Help */}
+              <div className="mt-2 text-xs text-gray-500">
+                Shortcuts: Alt+A (approve), Alt+R (reject), Alt+E (edit), Esc (clear selection)
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Pending Responses List */}
+              <div className="pending-responses-list">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-mono text-yellow-400">PENDING REVIEWS</h3>
+                  {pendingResponsesData.items.length > 0 && (
+                    <button
+                      onClick={selectAllResponses}
+                      className="text-xs text-blue-400 hover:text-blue-300"
+                    >
+                      {selectedResponses.size === pendingResponsesData.items.length ? 'Deselect All' : 'Select All'}
+                    </button>
+                  )}
+                </div>
               
               {isLoading ? (
                 <div className="text-center py-8">
                   <div className="text-green-400">Loading...</div>
                 </div>
-              ) : pendingResponses.length === 0 ? (
+              ) : pendingResponsesData.items.length === 0 ? (
                 <div className="text-center py-8 text-gray-400">
                   No pending responses to review
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {pendingResponses.map((response) => (
+                  {pendingResponsesData.items.map((response) => (
                     <div
                       key={response.id}
-                      className={`p-4 border rounded cursor-pointer transition-colors ${
+                      className={`p-4 border rounded transition-colors ${
                         selectedResponse?.id === response.id
                           ? 'border-green-400 bg-green-900 bg-opacity-20'
                           : 'border-gray-600 hover:border-gray-500'
                       }`}
-                      onClick={() => {
-                        setSelectedResponse(response);
-                        setEditedResponse(response.ai_response);
-                        setDmNotes('');
-                      }}
                     >
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="flex items-center space-x-2">
-                          <span className={`px-2 py-1 text-xs rounded ${getPriorityColor(response.priority)}`}>
-                            {getPriorityLabel(response.priority)}
-                          </span>
-                          <span className="text-blue-400 text-sm font-mono">
-                            {response.response_type.toUpperCase()}
-                          </span>
+                      <div className="flex items-start space-x-3">
+                        {/* Selection Checkbox */}
+                        <input
+                          type="checkbox"
+                          checked={selectedResponses.has(response.id)}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            toggleResponseSelection(response.id);
+                          }}
+                          className="mt-1 text-green-400 bg-gray-700 border-gray-600 rounded focus:ring-green-500"
+                        />
+                        
+                        {/* Response Content */}
+                        <div 
+                          className="flex-1 cursor-pointer"
+                          onClick={() => {
+                            setSelectedResponse(response);
+                            setEditedResponse(response.ai_response);
+                            setDmNotes('');
+                          }}
+                        >
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="flex items-center space-x-2">
+                              <span className={`px-2 py-1 text-xs rounded ${getPriorityColor(response.priority)}`}>
+                                {getPriorityLabel(response.priority)}
+                              </span>
+                              <span className="text-blue-400 text-sm font-mono">
+                                {response.response_type.toUpperCase()}
+                              </span>
+                            </div>
+                            <span className="text-xs text-gray-400">
+                              {formatTimestamp(response.created_at)}
+                            </span>
+                          </div>
+                          
+                          <div className="text-sm text-gray-300 mb-2">
+                            <strong>Player:</strong> {response.user_id}
+                          </div>
+                          
+                          <div className="text-sm text-gray-300">
+                            <strong>Context:</strong> {response.context.substring(0, 100)}...
+                          </div>
                         </div>
-                        <span className="text-xs text-gray-400">
-                          {formatTimestamp(response.created_at)}
-                        </span>
-                      </div>
-                      
-                      <div className="text-sm text-gray-300 mb-2">
-                        <strong>Player:</strong> {response.user_id}
-                      </div>
-                      
-                      <div className="text-sm text-gray-300">
-                        <strong>Context:</strong> {response.context.substring(0, 100)}...
                       </div>
                     </div>
                   ))}
                 </div>
               )}
+              </div>
             </div>
 
             {/* Review Panel */}
@@ -351,7 +619,61 @@ export default function DmDashboard({ sessionId, isVisible, onClose }: DmDashboa
             )}
           </div>
         )}
+
+        {/* Analytics Tab */}
+        {activeTab === 'analytics' && (
+          <div>
+            <h3 className="text-lg font-mono mb-4 text-yellow-400">ANALYTICS</h3>
+            
+            {analytics ? (
+              <div className="space-y-4">
+                <div className="p-4 border border-gray-600 rounded">
+                  <h4 className="text-green-400 font-mono mb-2">QUEUE STATUS</h4>
+                  <div className="text-gray-300 text-sm">
+                    <strong>Pending:</strong> {analytics.queue_status.pending_count}
+                  </div>
+                  <div className="text-gray-300 text-sm">
+                    <strong>High Priority:</strong> {analytics.queue_status.high_priority_count}
+                  </div>
+                </div>
+
+                <div className="p-4 border border-gray-600 rounded">
+                  <h4 className="text-green-400 font-mono mb-2">REVIEW STATISTICS</h4>
+                  <div className="text-gray-300 text-sm">
+                    <strong>Total Reviewed:</strong> {analytics.review_stats.total_reviewed}
+                  </div>
+                  <div className="text-gray-300 text-sm">
+                    <strong>Approved:</strong> {analytics.review_stats.approved_count}
+                  </div>
+                  <div className="text-gray-300 text-sm">
+                    <strong>Rejected:</strong> {analytics.review_stats.rejected_count}
+                  </div>
+                  <div className="text-gray-300 text-sm">
+                    <strong>Edited:</strong> {analytics.review_stats.edited_count}
+                  </div>
+                  <div className="text-gray-300 text-sm">
+                    <strong>Approval Rate:</strong> {analytics.review_stats.approval_rate.toFixed(2)}%
+                  </div>
+                  <div className="text-gray-300 text-sm">
+                    <strong>Average Review Time:</strong> {analytics.review_stats.avg_review_time_minutes.toFixed(2)} minutes
+                  </div>
+                </div>
+
+                <div className="p-4 border border-gray-600 rounded">
+                  <h4 className="text-green-400 font-mono mb-2">NOTIFICATIONS</h4>
+                  <div className="text-gray-300 text-sm">
+                    <strong>Unread:</strong> {analytics.notifications.unread_count}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-8 text-gray-400">
+                Loading analytics...
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
-} 
+}
