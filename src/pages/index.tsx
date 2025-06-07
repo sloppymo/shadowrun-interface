@@ -138,18 +138,18 @@ function Terminal({ sessionId, userId, role }: { sessionId: string; userId: stri
     setInput("");
     if (parsed.type === "empty") return;
     if (parsed.type === "command") {
-      if (["clear", "cls", "clr"].includes(parsed.cmd)) {
+      if (parsed.cmd && ["clear", "cls", "clr"].includes(parsed.cmd)) {
         setLines([]);
         return;
       }
-      if (["help", "?"].includes(parsed.cmd)) {
+      if (parsed.cmd && ["help", "?"].includes(parsed.cmd)) {
         setLines(l => [...l, {
           type: "system",
           text: `SHADOWRUN INTERFACE COMMANDS\n\nBASIC COMMANDS:\nhelp (h, ?) - Show available commands or detailed help for a specific command\nclear (cls, clr) - Clear the console output\ntheme (skin) - Change console theme\n\nSHADOWRUN COMMANDS:\n/scene, /roll, /summon, /echo, /mark, /meta, /recall, /pulse` }]);
         return;
       }
       // Add more command handling as needed
-      setLines(l => [...l, { type: "error", text: `Unknown command: ${parsed.cmd}\nType "help" for available commands.` }]);
+      setLines(l => [...l, { type: "error", text: `Unknown command: ${parsed.cmd || 'undefined'}\nType "help" for available commands.` }]);
       return;
     }
     // Natural language: send to backend
