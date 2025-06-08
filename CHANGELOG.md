@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.90.0-beta (2025-01-28)
+
+### 🧪 Testing Infrastructure Overhaul
+- **DiceRoller Test Suite Enhancement**: Fixed 12 out of 20 tests, improving from 6 passing tests
+- **Accessibility Implementation**: Added proper ARIA roles (`role="status"`, `aria-live="polite"`) for screen reader support
+- **Error Handling Improvements**: Enhanced null safety in `formatDiceResult` function and component state management
+- **MockEventSource Integration**: Created comprehensive WebSocket mocking for ShadowrunConsole testing
+- **TypeScript Configuration**: Updated `tsconfig.json` to properly support Vitest globals and testing environment
+- **Linter Error Resolution**: Fixed all TypeScript compilation issues and improved code quality standards
+
+### 🔧 Component Stability
+- **DiceRoller Component**: Added better error boundaries and input validation
+- **API Integration**: Improved fetch error handling and response validation
+- **User Experience**: Enhanced visual feedback for rolling states and error messages
+- **Code Quality**: Implemented consistent coding standards and documentation
+
+### 📝 Documentation Updates
+- **Roadmap Restructuring**: Clear categorization of completed, in-progress, and planned features
+- **Testing Guidelines**: Added comprehensive testing documentation and best practices
+
 ## v0.89.0-beta (2025-06-07)
 
 ### 🔐 Security Enhancements

@@ -9,6 +9,7 @@ export interface ShadowrunDiceResult {
   isCriticalGlitch: boolean;
   total?: number; // For non-shadowrun dice
   exploded: number[]; // Exploding 6s for edge
+  edge_used?: boolean; // Whether Edge was used in this roll
 }
 
 export interface DiceModifiers {
@@ -72,7 +73,8 @@ export function rollShadowrunDice(diceCount: number, modifiers: DiceModifiers = 
     sixes,
     isGlitch,
     isCriticalGlitch,
-    exploded
+    exploded,
+    edge_used: modifiers.edge || modifiers.explodingDice
   };
 }
 
@@ -103,7 +105,8 @@ export function rollStandardDice(notation: string): ShadowrunDiceResult {
     isGlitch: false,
     isCriticalGlitch: false,
     total,
-    exploded: []
+    exploded: [],
+    edge_used: false
   };
 }
 
@@ -141,7 +144,8 @@ export function parseDiceCommand(command: string): ShadowrunDiceResult {
       isGlitch: false,
       isCriticalGlitch: false,
       total: diceRoll + bonus,
-      exploded: []
+      exploded: [],
+      edge_used: false
     };
   }
   
@@ -150,34 +154,44 @@ export function parseDiceCommand(command: string): ShadowrunDiceResult {
 
 // Format dice results for display
 export function formatDiceResult(result: ShadowrunDiceResult, command: string): string {
+  // Handle undefined or null result
+  if (!result) {
+    return `Error: Invalid result for command "${command}"`;
+  }
+
   let output = `Rolling ${command}...\n`;
   
   if (result.total !== undefined) {
     // Standard dice
-    output += `Results: [${result.results.join(', ')}]\n`;
+    if (result.results && Array.isArray(result.results)) {
+      output += `Results: [${result.results.join(', ')}]\n`;
+    }
     output += `Total: ${result.total}`;
   } else {
     // Shadowrun dice
-    output += `Results: [${result.results.join(', ')}]\n`;
-    output += `Hits: ${result.hits}`;
+    if (result.results && Array.isArray(result.results)) {
+      output += `Results: [${result.results.join(', ')}]\n`;
+    }
+    output += `Hits: ${result.hits || 0}`;
     
-    if (result.exploded.length > 0) {
+    if (result.exploded && result.exploded.length > 0) {
       output += ` (+ ${result.exploded.length} exploded dice: [${result.exploded.join(', ')}])`;
     }
     
     if (result.isCriticalGlitch) {
-      output += `\n💀 CRITICAL GLITCH! (${result.ones} ones, no hits)`;
+      output += `\n💀 CRITICAL GLITCH! (${result.ones || 0} ones, no hits)`;
     } else if (result.isGlitch) {
-      output += `\n⚠️ Glitch! (${result.ones} ones)`;
+      output += `\n⚠️ Glitch! (${result.ones || 0} ones)`;
     }
     
-    if (result.hits === 0 && !result.isCriticalGlitch) {
+    const hits = result.hits || 0;
+    if (hits === 0 && !result.isCriticalGlitch) {
       output += '\n❌ No hits - failure!';
-    } else if (result.hits >= 4) {
+    } else if (hits >= 4) {
       output += '\n✨ Excellent success!';
-    } else if (result.hits >= 2) {
+    } else if (hits >= 2) {
       output += '\n✅ Good success!';
-    } else if (result.hits === 1) {
+    } else if (hits === 1) {
       output += '\n👍 Marginal success';
     }
   }

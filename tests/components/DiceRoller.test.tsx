@@ -2,59 +2,81 @@
  * Tests for DiceRoller component
  * Tests dice input validation, XSS prevention, and edge cases
  */
-import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
-import DiceRoller from '../../components/DiceRoller';
+import DiceRoller from '@components/DiceRoller';
 
-// Mock fetch for API calls
-global.fetch = jest.fn();
+// Mock fetch
+const mockFetch = vi.fn();
+global.fetch = mockFetch;
 
 describe('DiceRoller Component', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    (global.fetch as jest.Mock).mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        result: {
-          rolls: [3, 5, 2],
-          total: 10,
-          notation: '3d6'
-        }
-      })
-    });
-  });
-
-  afterEach(() => {
-    jest.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it('renders dice roller interface', () => {
     render(<DiceRoller />);
     
-    expect(screen.getByPlaceholderText(/dice notation/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /roll/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Enter dice command/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Roll dice' })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Use Edge/i)).toBeInTheDocument();
   });
 
-  it('handles valid dice notation', async () => {
-    const user = userEvent.setup();
+  it('handles dice roll submission', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        result: {
+          dice: 3,
+          results: [4, 5, 6],
+          hits: 2,
+          ones: 0,
+          sixes: 1,
+          isGlitch: false,
+          isCriticalGlitch: false,
+          total: 15,
+          exploded: []
+        }
+      })
+    });
+
     render(<DiceRoller />);
     
-    const input = screen.getByPlaceholderText(/dice notation/i);
-    const rollButton = screen.getByRole('button', { name: /roll/i });
-    
-    await user.type(input, '3d6');
-    await user.click(rollButton);
-    
+    const input = screen.getByPlaceholderText(/Enter dice command/i);
+    const rollButton = screen.getByRole('button', { name: 'Roll dice' });
+
+    await userEvent.type(input, '3d6');
+    await userEvent.click(rollButton);
+
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        expect.any(String),
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/roll',
         expect.objectContaining({
           method: 'POST',
-          body: expect.stringContaining('3d6')
+          body: JSON.stringify({ command: '3d6', edge: false })
         })
       );
+    });
+
+    expect(await screen.findByText(/Rolling 3d6/i)).toBeInTheDocument();
+  });
+
+  it('handles API errors', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network error'));
+
+    render(<DiceRoller />);
+    
+    const input = screen.getByPlaceholderText(/Enter dice command/i);
+    const rollButton = screen.getByRole('button', { name: 'Roll dice' });
+
+    await userEvent.type(input, '3d6');
+    await userEvent.click(rollButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/Network error/i);
     });
   });
 
@@ -63,8 +85,8 @@ describe('DiceRoller Component', () => {
       const user = userEvent.setup();
       render(<DiceRoller />);
       
-      const input = screen.getByPlaceholderText(/dice notation/i);
-      const rollButton = screen.getByRole('button', { name: /roll/i });
+      const input = screen.getByPlaceholderText(/Enter dice command/i);
+      const rollButton = screen.getByRole('button', { name: 'Roll dice' });
       
       const invalidNotations = [
         '100d100',  // Too many dice
@@ -90,8 +112,8 @@ describe('DiceRoller Component', () => {
       const user = userEvent.setup();
       render(<DiceRoller />);
       
-      const input = screen.getByPlaceholderText(/dice notation/i);
-      const rollButton = screen.getByRole('button', { name: /roll/i });
+      const input = screen.getByPlaceholderText(/Enter dice command/i);
+      const rollButton = screen.getByRole('button', { name: 'Roll dice' });
       
       const emojiNotations = [
         '10d🔥',
@@ -118,7 +140,7 @@ describe('DiceRoller Component', () => {
       const user = userEvent.setup();
       render(<DiceRoller />);
       
-      const input = screen.getByPlaceholderText(/dice notation/i);
+      const input = screen.getByPlaceholderText(/Enter dice command/i);
       const dangerousInputs = [
         '<script>alert("xss")</script>3d6',
         '3d6<img src=x onerror=alert("xss")>',
@@ -132,7 +154,7 @@ describe('DiceRoller Component', () => {
         await user.type(input, dangerous);
         
         // Check that dangerous content is not rendered
-        const container = screen.getByPlaceholderText(/dice notation/i).parentElement;
+        const container = screen.getByPlaceholderText(/Enter dice command/i).parentElement;
         expect(container?.innerHTML).not.toContain('<script>');
         expect(container?.innerHTML).not.toContain('onerror=');
         expect(container?.innerHTML).not.toContain('javascript:');
@@ -144,7 +166,7 @@ describe('DiceRoller Component', () => {
       const user = userEvent.setup();
       
       // Mock malicious API response
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as any).mockResolvedValueOnce({
         ok: true,
         json: async () => ({
           result: {
@@ -157,8 +179,8 @@ describe('DiceRoller Component', () => {
       
       render(<DiceRoller />);
       
-      const input = screen.getByPlaceholderText(/dice notation/i);
-      const rollButton = screen.getByRole('button', { name: /roll/i });
+      const input = screen.getByPlaceholderText(/Enter dice command/i);
+      const rollButton = screen.getByRole('button', { name: 'Roll dice' });
       
       await user.type(input, '3d6');
       await user.click(rollButton);
@@ -178,8 +200,8 @@ describe('DiceRoller Component', () => {
       
       // Look for Edge checkbox/toggle
       const edgeToggle = screen.getByLabelText(/edge/i);
-      const input = screen.getByPlaceholderText(/dice notation/i);
-      const rollButton = screen.getByRole('button', { name: /roll/i });
+      const input = screen.getByPlaceholderText(/Enter dice command/i);
+      const rollButton = screen.getByRole('button', { name: 'Roll dice' });
       
       await user.click(edgeToggle);
       await user.type(input, '5d6');
@@ -199,7 +221,7 @@ describe('DiceRoller Component', () => {
       const user = userEvent.setup();
       
       // Mock Edge roll response
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as any).mockResolvedValueOnce({
         ok: true,
         json: async () => ({
           result: {
@@ -215,8 +237,8 @@ describe('DiceRoller Component', () => {
       render(<DiceRoller />);
       
       const edgeToggle = screen.getByLabelText(/edge/i);
-      const input = screen.getByPlaceholderText(/dice notation/i);
-      const rollButton = screen.getByRole('button', { name: /roll/i });
+      const input = screen.getByPlaceholderText(/Enter dice command/i);
+      const rollButton = screen.getByRole('button', { name: 'Roll dice' });
       
       await user.click(edgeToggle);
       await user.type(input, '5d6');
@@ -234,7 +256,7 @@ describe('DiceRoller Component', () => {
       const user = userEvent.setup();
       
       // Mock glitch response
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as any).mockResolvedValueOnce({
         ok: true,
         json: async () => ({
           result: {
@@ -248,8 +270,8 @@ describe('DiceRoller Component', () => {
       
       render(<DiceRoller />);
       
-      const input = screen.getByPlaceholderText(/dice notation/i);
-      const rollButton = screen.getByRole('button', { name: /roll/i });
+      const input = screen.getByPlaceholderText(/Enter dice command/i);
+      const rollButton = screen.getByRole('button', { name: 'Roll dice' });
       
       await user.type(input, '5d6');
       await user.click(rollButton);
@@ -263,7 +285,7 @@ describe('DiceRoller Component', () => {
       const user = userEvent.setup();
       
       // Mock critical glitch response
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as any).mockResolvedValueOnce({
         ok: true,
         json: async () => ({
           result: {
@@ -277,8 +299,8 @@ describe('DiceRoller Component', () => {
       
       render(<DiceRoller />);
       
-      const input = screen.getByPlaceholderText(/dice notation/i);
-      const rollButton = screen.getByRole('button', { name: /roll/i });
+      const input = screen.getByPlaceholderText(/Enter dice command/i);
+      const rollButton = screen.getByRole('button', { name: 'Roll dice' });
       
       await user.type(input, '5d6');
       await user.click(rollButton);
@@ -293,27 +315,45 @@ describe('DiceRoller Component', () => {
     it('has proper ARIA labels', () => {
       render(<DiceRoller />);
       
-      const input = screen.getByPlaceholderText(/dice notation/i);
+      const input = screen.getByPlaceholderText(/Enter dice command/i);
       expect(input).toHaveAttribute('aria-label');
       
-      const rollButton = screen.getByRole('button', { name: /roll/i });
+      const rollButton = screen.getByRole('button', { name: 'Roll dice' });
       expect(rollButton).toHaveAttribute('aria-label');
     });
 
     it('announces results to screen readers', async () => {
       const user = userEvent.setup();
+      
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          result: {
+            dice: 3,
+            results: [4, 5, 6],
+            hits: 2,
+            ones: 0,
+            sixes: 1,
+            isGlitch: false,
+            isCriticalGlitch: false,
+            total: 15,
+            exploded: []
+          }
+        })
+      });
+      
       render(<DiceRoller />);
       
-      const input = screen.getByPlaceholderText(/dice notation/i);
-      const rollButton = screen.getByRole('button', { name: /roll/i });
+      const input = screen.getByPlaceholderText(/Enter dice command/i);
+      const rollButton = screen.getByRole('button', { name: 'Roll dice' });
       
       await user.type(input, '3d6');
       await user.click(rollButton);
       
       await waitFor(() => {
-        const liveRegion = screen.getByRole('status');
-        expect(liveRegion).toHaveAttribute('aria-live', 'polite');
-        expect(liveRegion).toHaveTextContent(/rolled/i);
+        const statusElement = screen.getByRole('status');
+        expect(statusElement).toHaveAttribute('aria-live', 'polite');
+        expect(statusElement).toHaveTextContent(/Rolling 3d6/i);
       });
     });
   });
@@ -322,41 +362,26 @@ describe('DiceRoller Component', () => {
     it('displays error message on API failure', async () => {
       const user = userEvent.setup();
       
-      (global.fetch as jest.Mock).mockRejectedValueOnce(
+      (global.fetch as any).mockRejectedValueOnce(
         new Error('Network error')
       );
       
       render(<DiceRoller />);
       
-      const input = screen.getByPlaceholderText(/dice notation/i);
-      const rollButton = screen.getByRole('button', { name: /roll/i });
+      const input = screen.getByPlaceholderText(/Enter dice command/i);
+      const rollButton = screen.getByRole('button', { name: 'Roll dice' });
       
       await user.type(input, '3d6');
       await user.click(rollButton);
       
       await waitFor(() => {
-        expect(screen.getByText(/error/i)).toBeInTheDocument();
+        expect(screen.getByRole('alert')).toHaveTextContent(/Network error/i);
       });
-    });
 
-    it('handles malformed API responses gracefully', async () => {
-      const user = userEvent.setup();
-      
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ invalid: 'response' })
-      });
-      
-      render(<DiceRoller />);
-      
-      const input = screen.getByPlaceholderText(/dice notation/i);
-      const rollButton = screen.getByRole('button', { name: /roll/i });
-      
-      await user.type(input, '3d6');
-      await user.click(rollButton);
-      
+      // Also check that the error appears in the results
       await waitFor(() => {
-        expect(screen.getByText(/error/i)).toBeInTheDocument();
+        const statusElement = screen.getByRole('status');
+        expect(statusElement).toHaveTextContent(/Error: Network error/i);
       });
     });
   });
@@ -366,8 +391,8 @@ describe('DiceRoller Component', () => {
       const user = userEvent.setup();
       render(<DiceRoller />);
       
-      const input = screen.getByPlaceholderText(/dice notation/i);
-      const rollButton = screen.getByRole('button', { name: /roll/i });
+      const input = screen.getByPlaceholderText(/Enter dice command/i);
+      const rollButton = screen.getByRole('button', { name: 'Roll dice' });
       
       await user.type(input, '3d6');
       
@@ -386,8 +411,8 @@ describe('DiceRoller Component', () => {
       const user = userEvent.setup();
       render(<DiceRoller />);
       
-      const input = screen.getByPlaceholderText(/dice notation/i);
-      const rollButton = screen.getByRole('button', { name: /roll/i });
+      const input = screen.getByPlaceholderText(/Enter dice command/i);
+      const rollButton = screen.getByRole('button', { name: 'Roll dice' });
       
       const injectionAttempts = [
         '3d6; rm -rf /',

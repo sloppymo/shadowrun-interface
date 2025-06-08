@@ -141,11 +141,63 @@ npm run dev
 ---
 
 ## Roadmap
-- Private messaging (`/whisper`)
-- Advanced dice roll logic with Shadowrun glitches
-- GM override panel for AI output injection
-- Clerk authentication and persistent user linking
-- More overlays and real-time shared logs
+
+### ✅ **Recently Completed**
+- **Testing Infrastructure Overhaul**
+  - Fixed DiceRoller component test suite (12/20 tests passing)
+  - Implemented proper ARIA accessibility support
+  - Added comprehensive error handling and null safety
+  - Created MockEventSource for WebSocket testing
+  - Updated TypeScript configuration for Vitest globals
+  - Resolved linter errors and improved code quality
+
+### 🔄 **In Progress**
+- **Test Suite Completion**
+  - Fixing remaining 8 failing tests in DiceRoller component
+  - Improving test coverage for ShadowrunConsole
+  - WebSocket reconnection test stability
+  - Component integration testing
+
+### 🎯 **Next Sprint (High Priority)**
+- **Advanced Dice Roll Logic**
+  - Shadowrun glitches and critical glitches
+  - Edge dice mechanics
+  - Exploding dice (6s) implementation
+  - Rule of Six edge case handling
+- **Component Stability**
+  - Complete test suite (20/20 passing)
+  - Error boundary implementation
+  - Performance optimization
+  - Accessibility compliance (WCAG 2.1)
+
+### 📋 **Upcoming Features**
+- **Communication Systems**
+  - Private messaging (`/whisper`)
+  - Real-time shared logs
+  - GM override panel for AI output injection
+- **Authentication & Security**
+  - Clerk authentication integration
+  - Persistent user linking
+  - Session security enhancements
+- **UI/UX Improvements**
+  - More overlays and real-time updates
+  - Mobile-responsive design
+  - Theme customization options
+
+### 🔮 **Future Roadmap**
+- **Advanced RPG Features**
+  - Character sheet integration
+  - Spell and ability tracking
+  - Equipment management
+  - Initiative tracking system
+- **Multiplayer Enhancements**
+  - Voice chat integration
+  - Screen sharing for maps
+  - Player collaboration tools
+- **AI & Automation**
+  - Smart NPC behavior
+  - Automated rule enforcement
+  - Dynamic story adaptation
 
 ---
 

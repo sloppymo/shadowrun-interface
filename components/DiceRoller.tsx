@@ -1,9 +1,13 @@
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { parseDiceCommand, formatDiceResult, spendEdge, ShadowrunDiceResult } from '../utils/dice';
 
 export default function DiceRoller() {
   const [diceInput, setDiceInput] = useState('');
+  const [useEdge, setUseEdge] = useState(false);
+  const [isRolling, setIsRolling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<Array<{ input: string; result: ShadowrunDiceResult; output: string; timestamp: Date }>>([]);
+  const rollTimeoutRef = useRef<NodeJS.Timeout>();
   const [quickRolls] = useState([
     { label: '6 dice', command: '6' },
     { label: '8 dice', command: '8' },
@@ -13,57 +17,136 @@ export default function DiceRoller() {
     { label: 'Initiative', command: 'init' },
   ]);
 
-  const rollDice = (command: string) => {
+  const validateDiceCommand = (command: string): boolean => {
+    // Basic validation to prevent command injection
+    const dangerousPatterns = [
+      /[;&|`$]/,
+      /rm\s+-rf/,
+      /curl\s+/,
+      /nc\s+/,
+      /eval\s*\(/,
+      /exec\s*\(/,
+    ];
+    
+    return !dangerousPatterns.some(pattern => pattern.test(command));
+  };
+
+  const rollDice = useCallback(async (command: string) => {
+    if (!validateDiceCommand(command)) {
+      setError('Invalid dice command');
+      return;
+    }
+
+    if (isRolling) return;
+    setIsRolling(true);
+    setError(null);
+
     try {
-      const result = parseDiceCommand(command);
-      const output = formatDiceResult(result, command);
+      const response = await fetch('/api/roll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          command,
+          edge: useEdge 
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to roll dice');
+      }
+
+      const data = await response.json();
+      
+      // Check if the response has the expected structure
+      if (!data || !data.result) {
+        setError('Malformed response from server');
+        setResults(prev => [{
+          input: command,
+          result: { dice: 0, results: [], hits: 0, ones: 0, sixes: 0, isGlitch: false, isCriticalGlitch: false, exploded: [] },
+          output: `Error: Invalid result for command "${command}"`,
+          timestamp: new Date()
+        }, ...prev].slice(0, 10));
+        return;
+      }
+      
+      const result = data.result;
       
       setResults(prev => [{
         input: command,
         result,
-        output,
+        output: formatDiceResult(result, command),
         timestamp: new Date()
-      }, ...prev].slice(0, 10)); // Keep last 10 rolls
+      }, ...prev].slice(0, 10));
       
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setError(errorMessage);
       setResults(prev => [{
         input: command,
         result: { dice: 0, results: [], hits: 0, ones: 0, sixes: 0, isGlitch: false, isCriticalGlitch: false, exploded: [] },
-        output: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        output: `Error: ${errorMessage}`,
         timestamp: new Date()
       }, ...prev].slice(0, 10));
+    } finally {
+      setIsRolling(false);
     }
-  };
+  }, [useEdge]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (diceInput.trim()) {
+    if (diceInput.trim() && !isRolling) {
       rollDice(diceInput.trim());
       setDiceInput('');
     }
   };
 
-  const rollWithEdge = (diceCount: number, edgeAction: 'reroll' | 'explode' | 'pushLimit') => {
+  const rollWithEdge = useCallback(async (diceCount: number, edgeAction: 'reroll' | 'explode' | 'pushLimit') => {
+    if (isRolling) return;
+    setIsRolling(true);
+    setError(null);
+
     try {
-      const result = spendEdge(diceCount, edgeAction);
-      const output = `${formatDiceResult(result, `${diceCount} dice with edge (${edgeAction})`)}\n✨ Edge spent: ${edgeAction}`;
+      const response = await fetch('/api/roll/edge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          diceCount,
+          edgeAction 
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to use edge');
+      }
+
+      const data = await response.json();
+      const result = data.result;
       
       setResults(prev => [{
         input: `${diceCount} + edge (${edgeAction})`,
         result,
-        output,
+        output: `${formatDiceResult(result, `${diceCount} dice with edge (${edgeAction})`)}\n✨ Edge spent: ${edgeAction}`,
         timestamp: new Date()
       }, ...prev].slice(0, 10));
     } catch (error) {
-      console.error('Edge roll error:', error);
+      setError(error instanceof Error ? error.message : 'Unknown error');
+    } finally {
+      setIsRolling(false);
     }
-  };
+  }, []);
 
   return (
-    <div className="bg-black bg-opacity-70 border border-red-900 border-opacity-40 rounded-lg p-6 text-white">
+    <div className="bg-black bg-opacity-70 border border-red-900 border-opacity-40 rounded-lg p-6 text-white" role="region" aria-label="Dice Roller">
       <h2 className="text-2xl font-bold text-green-500 mb-6 font-mono">
         🎲 SHADOWRUN DICE ROLLER
       </h2>
+
+      {/* Error Display */}
+      {error && (
+        <div className="mb-4 p-3 bg-red-900 text-red-100 rounded" role="alert">
+          {error}
+        </div>
+      )}
 
       {/* Dice Input */}
       <form onSubmit={handleSubmit} className="mb-6">
@@ -74,16 +157,34 @@ export default function DiceRoller() {
             onChange={(e) => setDiceInput(e.target.value)}
             placeholder="Enter dice command (e.g., '12', '3d6', 'init 8')..."
             className="flex-1 p-3 bg-gray-800 border border-gray-600 rounded text-white font-mono"
+            aria-label="Dice command input"
+            disabled={isRolling}
           />
           <button
             type="submit"
-            className="bg-green-700 text-green-100 px-6 py-3 rounded hover:bg-green-600 font-bold"
+            className="bg-green-700 text-green-100 px-6 py-3 rounded hover:bg-green-600 font-bold disabled:opacity-50"
+            disabled={isRolling}
+            aria-label="Roll dice"
           >
             ROLL
           </button>
         </div>
         <div className="mt-2 text-sm text-gray-400">
           Examples: "12" (SR dice), "12 limit 4" (with limit), "3d6+2" (standard), "init 8" (initiative)
+        </div>
+
+        {/* Edge Toggle */}
+        <div className="mt-4">
+          <label className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              checked={useEdge}
+              onChange={(e) => setUseEdge(e.target.checked)}
+              className="form-checkbox h-5 w-5 text-green-500"
+              aria-label="Use Edge"
+            />
+            <span>Use Edge</span>
+          </label>
         </div>
       </form>
 
@@ -95,7 +196,9 @@ export default function DiceRoller() {
             <button
               key={index}
               onClick={() => rollDice(roll.command)}
-              className="bg-blue-700 text-blue-100 px-3 py-2 rounded hover:bg-blue-600 text-sm"
+              className="bg-blue-700 text-blue-100 px-3 py-2 rounded hover:bg-blue-600 text-sm disabled:opacity-50"
+              disabled={isRolling}
+              aria-label={`Quick roll ${roll.label}`}
             >
               {roll.label}
             </button>
@@ -113,7 +216,9 @@ export default function DiceRoller() {
               <button
                 key={dice}
                 onClick={() => rollWithEdge(dice, 'reroll')}
-                className="w-full bg-yellow-700 text-yellow-100 px-2 py-1 rounded hover:bg-yellow-600 text-sm"
+                className="w-full bg-yellow-700 text-yellow-100 px-2 py-1 rounded hover:bg-yellow-600 text-sm disabled:opacity-50"
+                disabled={isRolling}
+                aria-label={`Reroll ${dice} dice with Edge`}
               >
                 {dice} dice
               </button>
@@ -125,7 +230,9 @@ export default function DiceRoller() {
               <button
                 key={dice}
                 onClick={() => rollWithEdge(dice, 'explode')}
-                className="w-full bg-orange-700 text-orange-100 px-2 py-1 rounded hover:bg-orange-600 text-sm"
+                className="w-full bg-orange-700 text-orange-100 px-2 py-1 rounded hover:bg-orange-600 text-sm disabled:opacity-50"
+                disabled={isRolling}
+                aria-label={`Explode ${dice} dice with Edge`}
               >
                 {dice} dice
               </button>
@@ -137,7 +244,9 @@ export default function DiceRoller() {
               <button
                 key={dice}
                 onClick={() => rollWithEdge(dice, 'pushLimit')}
-                className="w-full bg-red-700 text-red-100 px-2 py-1 rounded hover:bg-red-600 text-sm"
+                className="w-full bg-red-700 text-red-100 px-2 py-1 rounded hover:bg-red-600 text-sm disabled:opacity-50"
+                disabled={isRolling}
+                aria-label={`Push the limit with ${dice} dice`}
               >
                 {dice} dice
               </button>
@@ -149,9 +258,16 @@ export default function DiceRoller() {
       {/* Results */}
       <div>
         <h3 className="text-lg font-bold text-red-400 mb-3">Recent Rolls</h3>
-        <div className="space-y-4 max-h-96 overflow-y-auto">
+        <div 
+          className="space-y-4 max-h-96 overflow-y-auto" 
+          role="log"
+          aria-live="polite"
+          data-testid="dice-results"
+        >
           {results.length === 0 ? (
-            <p className="text-gray-400 italic text-center py-8">No rolls yet. Enter a dice command above!</p>
+            <p className="text-gray-400 italic text-center py-8">
+              No rolls yet. Enter a dice command above!
+            </p>
           ) : (
             results.map((roll, index) => (
               <div key={index} className="border border-gray-700 rounded p-4">
@@ -163,10 +279,15 @@ export default function DiceRoller() {
                     {roll.timestamp.toLocaleTimeString()}
                   </div>
                 </div>
-                <div className="whitespace-pre-wrap text-sm">
+                <div 
+                  className="whitespace-pre-wrap text-sm"
+                  role="status"
+                  aria-live="polite"
+                >
                   {roll.output}
                 </div>
-                {roll.result.results.length > 0 && (
+
+                {roll.result && roll.result.results && roll.result.results.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {roll.result.results.map((die, dieIndex) => (
                       <span
@@ -176,11 +297,12 @@ export default function DiceRoller() {
                           die === 1 ? 'bg-red-600 border-red-400 text-white' :
                           'bg-gray-600 border-gray-400 text-gray-300'
                         }`}
+                        aria-label={`Die roll: ${die}`}
                       >
                         {die}
                       </span>
                     ))}
-                    {roll.result.exploded.length > 0 && (
+                    {roll.result.exploded && roll.result.exploded.length > 0 && (
                       <div className="ml-2 flex flex-wrap gap-1">
                         <span className="text-yellow-400 text-sm mr-1">+</span>
                         {roll.result.exploded.map((die, dieIndex) => (
@@ -190,6 +312,7 @@ export default function DiceRoller() {
                               die >= 5 ? 'bg-yellow-600 border-yellow-400 text-white' :
                               'bg-yellow-800 border-yellow-600 text-gray-300'
                             }`}
+                            aria-label={`Exploded die roll: ${die}`}
                           >
                             {die}
                           </span>
@@ -203,18 +326,6 @@ export default function DiceRoller() {
           )}
         </div>
       </div>
-
-      {/* Clear Results */}
-      {results.length > 0 && (
-        <div className="mt-4 text-center">
-          <button
-            onClick={() => setResults([])}
-            className="bg-gray-700 text-gray-300 px-4 py-2 rounded hover:bg-gray-600"
-          >
-            Clear Results
-          </button>
-        </div>
-      )}
     </div>
   );
 }
