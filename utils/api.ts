@@ -61,40 +61,85 @@ export interface DiceRoll {
 // Session Management
 export const sessionAPI = {
   async createSession(name: string, maxPlayers: number = 6): Promise<SessionInfo> {
-    const response = await api.post('/sessions', { name, maxPlayers });
-    return response.data;
+    const response = await api.post('/api/session', { name, gm_user_id: 'current-user' });
+    return {
+      id: response.data.session_id,
+      name: response.data.name,
+      playerCount: 1,
+      maxPlayers,
+      gameState: 'waiting',
+      isGM: true
+    };
   },
 
   async joinSession(sessionId: string, password?: string): Promise<SessionInfo> {
-    const response = await api.post(`/sessions/${sessionId}/join`, { password });
-    return response.data;
+    const response = await api.post(`/api/session/${sessionId}/join`, { 
+      user_id: 'current-user',
+      role: 'player'
+    });
+    return {
+      id: response.data.session_id,
+      name: 'Session',
+      playerCount: 1,
+      maxPlayers: 6,
+      gameState: 'active',
+      isGM: false
+    };
   },
 
   async leaveSession(sessionId: string): Promise<void> {
-    await api.post(`/sessions/${sessionId}/leave`);
+    // Backend doesn't have a leave endpoint yet, so this is a no-op for now
+    console.log('Leave session not implemented yet');
   },
 
   async getActiveSessions(): Promise<SessionInfo[]> {
-    const response = await api.get('/sessions');
-    return response.data;
+    // Backend doesn't have a list sessions endpoint, return empty for now
+    return [];
   },
 
   async getSessionInfo(sessionId: string): Promise<SessionInfo> {
-    const response = await api.get(`/sessions/${sessionId}`);
-    return response.data;
+    const response = await api.get(`/api/session/${sessionId}/users`);
+    return {
+      id: sessionId,
+      name: 'Active Session',
+      playerCount: response.data.length,
+      maxPlayers: 6,
+      gameState: 'active',
+      isGM: false
+    };
   }
 };
 
 // Command Processing
 export const commandAPI = {
   async executeCommand(sessionId: string, command: string): Promise<CommandResponse> {
-    const response = await api.post(`/sessions/${sessionId}/command`, { command });
-    return response.data;
+    const response = await api.post('/api/command', { 
+      session_id: sessionId,
+      command: command,
+      user_id: 'current-user'
+    });
+    return {
+      success: true,
+      output: response.data.output || response.data.response,
+      data: response.data,
+      broadcast: false
+    };
   },
 
   async rollDice(sessionId: string, notation: string): Promise<DiceRoll> {
-    const response = await api.post(`/sessions/${sessionId}/roll`, { notation });
-    return response.data;
+    const response = await api.post('/api/command', { 
+      session_id: sessionId,
+      command: `roll ${notation}`,
+      user_id: 'current-user'
+    });
+    return {
+      dice: notation,
+      results: response.data.results || [],
+      total: response.data.total || 0,
+      hits: response.data.hits,
+      glitches: response.data.glitches,
+      criticalGlitch: response.data.criticalGlitch
+    };
   }
 };
 
@@ -105,6 +150,7 @@ export class ShadowrunWebSocket {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
+  private connected = false;
 
   private onMessageCallback?: (data: any) => void;
   private onConnectionCallback?: (connected: boolean) => void;
@@ -122,6 +168,7 @@ export class ShadowrunWebSocket {
       this.ws.onopen = () => {
         console.log('WebSocket connected');
         this.reconnectAttempts = 0;
+        this.connected = true;
         this.onConnectionCallback?.(true);
       };
 
@@ -136,15 +183,19 @@ export class ShadowrunWebSocket {
 
       this.ws.onclose = () => {
         console.log('WebSocket disconnected');
+        this.connected = false;
         this.onConnectionCallback?.(false);
         this.attemptReconnect();
       };
 
       this.ws.onerror = (error) => {
         console.error('WebSocket error:', error);
+        this.connected = false;
+        this.onConnectionCallback?.(false);
       };
     } catch (error) {
       console.error('Failed to create WebSocket connection:', error);
+      this.connected = false;
       this.onConnectionCallback?.(false);
     }
   }
@@ -175,13 +226,14 @@ export class ShadowrunWebSocket {
       this.ws.close();
       this.ws = null;
     }
+    this.connected = false;
     this.sessionId = null;
     this.onMessageCallback = undefined;
     this.onConnectionCallback = undefined;
   }
 
   isConnected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN;
+    return this.connected;
   }
 }
 

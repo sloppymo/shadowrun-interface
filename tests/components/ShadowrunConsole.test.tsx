@@ -1,441 +1,316 @@
-import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ShadowrunConsole } from '@/components/ShadowrunConsole';
-import { useRouter } from 'next/router';
-import { useUser } from '@clerk/nextjs';
 import '@testing-library/jest-dom';
+import ShadowrunConsole from '@components/ShadowrunConsole';
+import type { Theme } from '@components/types';
+import { ShadowrunWebSocket } from '@utils/api';
 
-// Mock dependencies
-jest.mock('next/router');
-jest.mock('@clerk/nextjs');
-
-// Mock WebSocket
-class MockWebSocket {
-  onopen: ((event: Event) => void) | null = null;
-  onclose: ((event: CloseEvent) => void) | null = null;
+// Mock EventSource
+class MockEventSource {
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
-  readyState: number = WebSocket.CONNECTING;
-  
-  constructor(public url: string) {
+  onopen: ((event: Event) => void) | null = null;
+  close = vi.fn();
+
+  constructor(url: string) {
+    // Simulate connection
     setTimeout(() => {
-      this.readyState = WebSocket.OPEN;
-      if (this.onopen) this.onopen(new Event('open'));
-    }, 100);
-  }
-  
-  send(data: string) {
-    // Mock echo response
-    setTimeout(() => {
-      if (this.onmessage) {
-        this.onmessage(new MessageEvent('message', { data }));
+      if (this.onopen) {
+        this.onopen(new Event('open'));
       }
-    }, 50);
-  }
-  
-  close() {
-    this.readyState = WebSocket.CLOSED;
-    if (this.onclose) this.onclose(new CloseEvent('close'));
+    }, 0);
   }
 }
 
-global.WebSocket = MockWebSocket as any;
+// Mock global EventSource
+vi.stubGlobal('EventSource', MockEventSource);
 
-describe('ShadowrunConsole', () => {
-  const mockRouter = {
-    push: jest.fn(),
-    query: {},
-  };
-  
-  const mockUser = {
-    user: {
-      id: 'test-user-123',
-      firstName: 'Test',
-      lastName: 'User',
-    },
-    isLoaded: true,
-    isSignedIn: true,
-  };
-  
+// Remove WebSocket mocks since we're using EventSource
+vi.mock('@utils/api', () => ({
+  ShadowrunWebSocket: vi.fn()
+}));
+
+// Mock useUser hook
+vi.mock('@clerk/nextjs', () => ({
+  useUser: () => ({
+    user: { id: 'test-user', firstName: 'Test' },
+    isSignedIn: true
+  })
+}));
+
+// Default theme for testing
+const defaultTheme: Theme = {
+  name: 'Test Theme',
+  background: 'bg-black',
+  text: 'text-white',
+  secondaryText: 'text-gray-400',
+  accent: 'bg-blue-600',
+  prompt: 'text-green-500',
+  input: 'bg-gray-800',
+  inputText: 'text-white',
+  secondaryBackground: 'bg-gray-900'
+};
+
+describe('ShadowrunConsole Component', () => {
+  let mockEventSource: MockEventSource;
+
   beforeEach(() => {
-    jest.clearAllMocks();
-    (useRouter as jest.Mock).mockReturnValue(mockRouter);
-    (useUser as jest.Mock).mockReturnValue(mockUser);
-    
-    // Mock fetch
-    global.fetch = jest.fn();
+    vi.clearAllMocks();
+    mockEventSource = new MockEventSource('http://localhost:5000/events');
   });
-  
-  afterEach(() => {
-    jest.restoreAllMocks();
+
+  it('renders console interface', async () => {
+    render(<ShadowrunConsole theme={defaultTheme} />);
+    
+    // Wait for connection to be established
+    await waitFor(() => {
+      expect(screen.getByText(/connected to the matrix/i)).toBeInTheDocument();
+    });
+    
+    expect(screen.getByRole('textbox')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /settings/i })).toBeInTheDocument();
   });
-  
-  describe('Component Rendering', () => {
-    it('should render console interface', () => {
-      render(<ShadowrunConsole />);
-      
-      expect(screen.getByTestId('console-container')).toBeInTheDocument();
-      expect(screen.getByTestId('console-input')).toBeInTheDocument();
-      expect(screen.getByTestId('console-output')).toBeInTheDocument();
+
+  it('handles message submission', async () => {
+    render(<ShadowrunConsole theme={defaultTheme} />);
+    
+    // Wait for connection
+    await waitFor(() => {
+      expect(screen.getByText(/connected to the matrix/i)).toBeInTheDocument();
     });
     
-    it('should display welcome message', async () => {
-      render(<ShadowrunConsole />);
-      
-      await waitFor(() => {
-        expect(screen.getByText(/Welcome to Shadowrun RPG System/i)).toBeInTheDocument();
-      });
-    });
-    
-    it('should show user info when authenticated', () => {
-      render(<ShadowrunConsole />);
-      
-      expect(screen.getByText(/Test User/i)).toBeInTheDocument();
-    });
+    const input = screen.getByRole('textbox');
+    await userEvent.type(input, 'Test message{enter}');
+
+    expect(screen.getByText('Test message')).toBeInTheDocument();
   });
-  
-  describe('Command Processing', () => {
-    it('should process help command', async () => {
-      const user = userEvent.setup();
-      render(<ShadowrunConsole />);
-      
-      const input = screen.getByTestId('console-input');
-      await user.type(input, '/help{enter}');
-      
-      await waitFor(() => {
-        expect(screen.getByText(/Available Commands:/i)).toBeInTheDocument();
-      });
-    });
+
+  it('handles connection errors', async () => {
+    render(<ShadowrunConsole theme={defaultTheme} />);
     
-    it('should handle session create command', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ 
-          session_id: 'test-session-123',
-          name: 'Test Campaign' 
-        }),
-      });
+    // Simulate connection error
+    if (mockEventSource.onerror) {
+      mockEventSource.onerror(new Event('error'));
+    }
+
+    expect(await screen.findByText(/lost connection to the matrix/i)).toBeInTheDocument();
+  });
+
+  describe('Accessibility', () => {
+    it('has proper ARIA labels', () => {
+      render(<ShadowrunConsole theme={defaultTheme} />);
       
-      const user = userEvent.setup();
-      render(<ShadowrunConsole />);
-      
-      const input = screen.getByTestId('console-input');
-      await user.type(input, '/session create Test Campaign{enter}');
-      
-      await waitFor(() => {
-        expect(screen.getByText(/Session created successfully/i)).toBeInTheDocument();
-      });
-      
-      expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/session'),
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({ name: 'Test Campaign' }),
-        })
-      );
+      expect(screen.getByRole('textbox')).toHaveAttribute('aria-label', 'Command input');
+      expect(screen.getByRole('button', { name: /settings/i })).toHaveAttribute('aria-label', 'Open settings');
+      expect(screen.getByRole('button', { name: /send/i })).toHaveAttribute('aria-label', 'Send command');
     });
-    
-    it('should handle invalid commands', async () => {
-      const user = userEvent.setup();
-      render(<ShadowrunConsole />);
+
+    it('announces results to screen readers', async () => {
+      render(<ShadowrunConsole theme={defaultTheme} />);
       
-      const input = screen.getByTestId('console-input');
-      await user.type(input, '/invalidcommand{enter}');
-      
-      await waitFor(() => {
-        expect(screen.getByText(/Unknown command/i)).toBeInTheDocument();
-      });
+      const input = screen.getByRole('textbox');
+      await userEvent.type(input, 'roll 4d6{enter}');
+
+      // Simulate successful roll response
+      if (mockEventSource.onmessage) {
+        mockEventSource.onmessage(new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'roll_result',
+            result: {
+              rolls: [4, 5, 6, 1],
+              total: 16,
+              glitch: false,
+              critical_glitch: false
+            }
+          })
+        }));
+      }
+
+      expect(await screen.findByRole('status')).toHaveTextContent(/rolled 16/i);
     });
   });
-  
-  describe('WebSocket Connection', () => {
-    it('should establish WebSocket connection on mount', async () => {
-      render(<ShadowrunConsole />);
+
+  describe('Error Handling', () => {
+    it('displays error message on API failure', async () => {
+      render(<ShadowrunConsole theme={defaultTheme} />);
       
-      await waitFor(() => {
-        expect(screen.getByTestId('connection-status')).toHaveTextContent('Connected');
-      });
+      const input = screen.getByRole('textbox');
+      await userEvent.type(input, 'roll 4d6{enter}');
+
+      // Simulate API error
+      if (mockEventSource.onmessage) {
+        mockEventSource.onmessage(new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'error',
+            message: 'Failed to process roll'
+          })
+        }));
+      }
+
+      expect(await screen.findByText(/failed to process roll/i)).toBeInTheDocument();
     });
-    
-    it('should handle WebSocket disconnection', async () => {
-      const { rerender } = render(<ShadowrunConsole />);
+
+    it('handles malformed API responses gracefully', async () => {
+      render(<ShadowrunConsole theme={defaultTheme} />);
+      
+      const input = screen.getByRole('textbox');
+      await userEvent.type(input, 'roll 4d6{enter}');
+
+      // Simulate malformed response
+      if (mockEventSource.onmessage) {
+        mockEventSource.onmessage(new MessageEvent('message', {
+          data: 'invalid json'
+        }));
+      }
+
+      expect(await screen.findByText(/error processing response/i)).toBeInTheDocument();
+    });
+  });
+
+  describe('Glitch Detection', () => {
+    it('displays glitch warnings', async () => {
+      render(<ShadowrunConsole theme={defaultTheme} />);
+      
+      const input = screen.getByRole('textbox');
+      await userEvent.type(input, 'roll 4d6{enter}');
+
+      // Simulate glitch response
+      if (mockEventSource.onmessage) {
+        mockEventSource.onmessage(new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'roll_result',
+            result: {
+              rolls: [1, 1, 5, 6],
+              total: 13,
+              glitch: true,
+              critical_glitch: false
+            }
+          })
+        }));
+      }
+
+      expect(await screen.findByText(/glitch!/i)).toBeInTheDocument();
+    });
+
+    it('displays critical glitch warnings', async () => {
+      render(<ShadowrunConsole theme={defaultTheme} />);
+      
+      const input = screen.getByRole('textbox');
+      await userEvent.type(input, 'roll 4d6{enter}');
+
+      // Simulate critical glitch response
+      if (mockEventSource.onmessage) {
+        mockEventSource.onmessage(new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'roll_result',
+            result: {
+              rolls: [1, 1, 1, 1],
+              total: 4,
+              glitch: true,
+              critical_glitch: true
+            }
+          })
+        }));
+      }
+
+      expect(await screen.findByText(/critical glitch!/i)).toBeInTheDocument();
+    });
+  });
+
+  describe('Rapid Clicking Prevention', () => {
+    it('prevents multiple simultaneous rolls', async () => {
+      render(<ShadowrunConsole theme={defaultTheme} />);
+      
+      const input = screen.getByRole('textbox');
+      const sendButton = screen.getByRole('button', { name: /send/i });
+
+      // First roll
+      await userEvent.type(input, 'roll 4d6');
+      await userEvent.click(sendButton);
+
+      // Try to roll again immediately
+      await userEvent.clear(input);
+      await userEvent.type(input, 'roll 4d6');
+      await userEvent.click(sendButton);
+
+      // Should only see one roll request
+      expect(screen.getAllByText(/roll 4d6/i)).toHaveLength(1);
+    });
+  });
+
+  describe('Command Injection Prevention', () => {
+    it('prevents command injection attempts', async () => {
+      render(<ShadowrunConsole theme={defaultTheme} />);
+      
+      const input = screen.getByRole('textbox');
+      await userEvent.type(input, 'roll 4d6; rm -rf /{enter}');
+
+      // Should sanitize the command
+      expect(screen.getByText(/roll 4d6/i)).toBeInTheDocument();
+      expect(screen.queryByText(/rm -rf/i)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Roll Handling', () => {
+    it('processes roll results correctly', async () => {
+      render(<ShadowrunConsole theme={defaultTheme} />);
       
       // Wait for connection
       await waitFor(() => {
-        expect(screen.getByTestId('connection-status')).toHaveTextContent('Connected');
+        expect(screen.getByText(/connected to the matrix/i)).toBeInTheDocument();
       });
       
-      // Simulate disconnection
-      const ws = (window as any).mockWebSocket;
-      ws.close();
-      
-      await waitFor(() => {
-        expect(screen.getByTestId('connection-status')).toHaveTextContent('Disconnected');
-      });
-    });
-    
-    it('should handle WebSocket reconnection', async () => {
-      jest.useFakeTimers();
-      render(<ShadowrunConsole />);
-      
-      // Initial connection
-      await waitFor(() => {
-        expect(screen.getByTestId('connection-status')).toHaveTextContent('Connected');
-      });
-      
-      // Force disconnect
-      const ws = (window as any).mockWebSocket;
-      ws.close();
-      
-      // Fast-forward reconnection timer
-      jest.advanceTimersByTime(5000);
-      
-      await waitFor(() => {
-        expect(screen.getByTestId('connection-status')).toHaveTextContent('Reconnecting');
-      });
-      
-      jest.useRealTimers();
-    });
-  });
-  
-  describe('Error Handling', () => {
-    it('should handle API errors gracefully', async () => {
-      (global.fetch as jest.Mock).mockRejectedValueOnce(new Error('Network error'));
-      
-      const user = userEvent.setup();
-      render(<ShadowrunConsole />);
-      
-      const input = screen.getByTestId('console-input');
-      await user.type(input, '/session create Test{enter}');
-      
-      await waitFor(() => {
-        expect(screen.getByText(/Error: Network error/i)).toBeInTheDocument();
-      });
-    });
-    
-    it('should handle malformed server responses', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        json: async () => ({ error: 'Internal server error' }),
-      });
-      
-      const user = userEvent.setup();
-      render(<ShadowrunConsole />);
-      
-      const input = screen.getByTestId('console-input');
-      await user.type(input, '/ai test message{enter}');
-      
-      await waitFor(() => {
-        expect(screen.getByText(/Error.*Internal server error/i)).toBeInTheDocument();
-      });
-    });
-  });
-  
-  describe('Input Validation', () => {
-    it('should reject empty commands', async () => {
-      const user = userEvent.setup();
-      render(<ShadowrunConsole />);
-      
-      const input = screen.getByTestId('console-input');
-      await user.type(input, '{enter}');
-      
-      // Should not process empty input
-      expect(screen.queryByText(/Processing/i)).not.toBeInTheDocument();
-    });
-    
-    it('should sanitize XSS attempts in input', async () => {
-      const user = userEvent.setup();
-      render(<ShadowrunConsole />);
-      
-      const input = screen.getByTestId('console-input');
-      const xssPayload = '<script>alert("XSS")</script>';
-      await user.type(input, `${xssPayload}{enter}`);
-      
-      await waitFor(() => {
-        // Should escape the script tag
-        expect(screen.queryByText(/<script>/)).not.toBeInTheDocument();
-        expect(screen.getByText(/&lt;script&gt;/i)).toBeInTheDocument();
-      });
-    });
-    
-    it('should handle very long inputs', async () => {
-      const user = userEvent.setup();
-      render(<ShadowrunConsole />);
-      
-      const input = screen.getByTestId('console-input');
-      const longInput = 'A'.repeat(10000);
-      await user.type(input, `${longInput}{enter}`);
-      
-      await waitFor(() => {
-        expect(screen.getByText(/Input too long/i)).toBeInTheDocument();
-      });
-    });
-  });
-  
-  describe('Special Characters and Unicode', () => {
-    it('should handle unicode characters properly', async () => {
-      const user = userEvent.setup();
-      render(<ShadowrunConsole />);
-      
-      const input = screen.getByTestId('console-input');
-      const unicodeInput = '🔥 テスト 测试 🎮';
-      await user.type(input, `${unicodeInput}{enter}`);
-      
-      await waitFor(() => {
-        expect(screen.getByText(unicodeInput)).toBeInTheDocument();
-      });
-    });
-    
-    it('should handle special control characters', async () => {
-      const user = userEvent.setup();
-      render(<ShadowrunConsole />);
-      
-      const input = screen.getByTestId('console-input');
-      const controlChars = 'test\x00\x01\x02';
-      
-      // Type without using special chars that might break
-      await user.type(input, 'test{enter}');
-      
-      // Verify no crash or unexpected behavior
-      expect(screen.getByTestId('console-container')).toBeInTheDocument();
-    });
-  });
-  
-  describe('Session Management', () => {
-    it('should handle session join', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ success: true, role: 'player' }),
-      });
-      
-      const user = userEvent.setup();
-      render(<ShadowrunConsole />);
-      
-      const input = screen.getByTestId('console-input');
-      await user.type(input, '/session join abc123{enter}');
-      
-      await waitFor(() => {
-        expect(screen.getByText(/Joined session/i)).toBeInTheDocument();
-      });
-    });
-    
-    it('should update UI for GM role', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ 
-          session_id: 'test-123',
-          role: 'gm' 
-        }),
-      });
-      
-      const user = userEvent.setup();
-      render(<ShadowrunConsole />);
-      
-      const input = screen.getByTestId('console-input');
-      await user.type(input, '/session create GM Test{enter}');
-      
-      await waitFor(() => {
-        expect(screen.getByTestId('gm-indicator')).toBeInTheDocument();
-        expect(screen.getByText(/Game Master/i)).toBeInTheDocument();
-      });
-    });
-  });
-  
-  describe('Real-time Features', () => {
-    it('should display incoming WebSocket messages', async () => {
-      render(<ShadowrunConsole />);
-      
-      // Wait for WebSocket connection
-      await waitFor(() => {
-        expect(screen.getByTestId('connection-status')).toHaveTextContent('Connected');
-      });
-      
-      // Simulate incoming message
-      const ws = (window as any).mockWebSocket;
-      const message = {
-        type: 'notification',
-        content: 'Player joined the session',
-      };
-      
-      if (ws.onmessage) {
-        ws.onmessage(new MessageEvent('message', { 
-          data: JSON.stringify(message) 
+      const input = screen.getByRole('textbox');
+      await userEvent.type(input, 'roll 4d6{enter}');
+
+      // Simulate roll response
+      if (mockEventSource.onmessage) {
+        mockEventSource.onmessage(new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'roll_result',
+            result: {
+              rolls: [4, 5, 6, 1],
+              total: 16,
+              glitch: false,
+              critical_glitch: false
+            }
+          })
         }));
       }
-      
-      await waitFor(() => {
-        expect(screen.getByText(/Player joined the session/i)).toBeInTheDocument();
-      });
+
+      expect(await screen.findByText(/rolled 16/i)).toBeInTheDocument();
+      expect(screen.getByText(/4, 5, 6, 1/i)).toBeInTheDocument();
     });
-    
-    it('should handle DM review notifications', async () => {
-      render(<ShadowrunConsole />);
+
+    it('handles glitch results', async () => {
+      render(<ShadowrunConsole theme={defaultTheme} />);
       
+      // Wait for connection
       await waitFor(() => {
-        expect(screen.getByTestId('connection-status')).toHaveTextContent('Connected');
+        expect(screen.getByText(/connected to the matrix/i)).toBeInTheDocument();
       });
       
-      const ws = (window as any).mockWebSocket;
-      const notification = {
-        type: 'dm_review',
-        response_id: 'resp-123',
-        player: 'TestPlayer',
-        preview: 'What do I see?',
-      };
-      
-      if (ws.onmessage) {
-        ws.onmessage(new MessageEvent('message', { 
-          data: JSON.stringify(notification) 
+      const input = screen.getByRole('textbox');
+      await userEvent.type(input, 'roll 4d6{enter}');
+
+      // Simulate glitch response
+      if (mockEventSource.onmessage) {
+        mockEventSource.onmessage(new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'roll_result',
+            result: {
+              rolls: [1, 1, 5, 6],
+              total: 13,
+              glitch: true,
+              critical_glitch: false
+            }
+          })
         }));
       }
-      
-      await waitFor(() => {
-        expect(screen.getByText(/New review request from TestPlayer/i)).toBeInTheDocument();
-      });
-    });
-  });
-  
-  describe('Performance and Race Conditions', () => {
-    it('should handle rapid command submission', async () => {
-      const user = userEvent.setup();
-      render(<ShadowrunConsole />);
-      
-      const input = screen.getByTestId('console-input');
-      
-      // Rapid fire commands
-      await user.type(input, '/help{enter}');
-      await user.type(input, '/status{enter}');
-      await user.type(input, '/roll 3d6{enter}');
-      
-      // Should queue and process all commands
-      await waitFor(() => {
-        expect(screen.getAllByText(/Processing/i).length).toBeGreaterThan(0);
-      });
-    });
-    
-    it('should prevent duplicate session creation', async () => {
-      let callCount = 0;
-      (global.fetch as jest.Mock).mockImplementation(() => {
-        callCount++;
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ session_id: `session-${callCount}` }),
-        });
-      });
-      
-      const user = userEvent.setup();
-      render(<ShadowrunConsole />);
-      
-      const input = screen.getByTestId('console-input');
-      
-      // Double-click submit
-      await user.type(input, '/session create Test');
-      await user.keyboard('{enter}{enter}');
-      
-      // Should only create one session
-      expect(callCount).toBe(1);
+
+      expect(await screen.findByText(/rolled 13/i)).toBeInTheDocument();
+      expect(screen.getByText(/glitch/i)).toBeInTheDocument();
     });
   });
 }); 

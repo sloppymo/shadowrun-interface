@@ -2,6 +2,18 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useUser } from '@clerk/nextjs';
 import axios from 'axios';
 
+interface Theme {
+  name: string;
+  background: string;
+  text: string;
+  secondaryText: string;
+  accent: string;
+  prompt: string;
+  input: string;
+  inputText: string;
+  secondaryBackground: string;
+}
+
 interface GeneratedImage {
   id: string;
   prompt: string;
@@ -17,6 +29,7 @@ interface ImageGalleryProps {
   sessionId: string;
   isVisible: boolean;
   onClose: () => void;
+  theme: Theme;
 }
 
 interface Provider {
@@ -26,7 +39,7 @@ interface Provider {
 
 const API_BASE_URL = 'http://localhost:5000';
 
-export default function ImageGallery({ sessionId, isVisible, onClose }: ImageGalleryProps) {
+export default function ImageGallery({ sessionId, isVisible, onClose, theme }: ImageGalleryProps) {
   const { user } = useUser();
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);

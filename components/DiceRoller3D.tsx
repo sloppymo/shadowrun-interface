@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, Suspense } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Box, Text, OrbitControls, Environment, PerspectiveCamera } from '@react-three/drei';
+import { Mesh } from 'three';
 import { Physics, useBox, usePlane } from '@react-three/cannon';
 import * as THREE from 'three';
 
@@ -18,7 +19,8 @@ type RollResult = {
 
 // Custom dice component with physics
 function Die({ position, onRollComplete }: { position: [number, number, number], onRollComplete: (value: number) => void }) {
-  const [ref, api] = useBox(() => ({
+  const [ref, api] = useBox<THREE.Mesh<THREE.BufferGeometry, THREE.Material | THREE.Material[]>>(() => ({
+    type: 'Dynamic',
     mass: 1,
     position,
     rotation: [Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI],
@@ -86,7 +88,7 @@ function Die({ position, onRollComplete }: { position: [number, number, number],
   };
 
   return (
-    <Box ref={ref} args={[1, 1, 1]} castShadow receiveShadow>
+    <Box ref={ref as any} args={[1, 1, 1]} castShadow receiveShadow>
       <meshStandardMaterial 
         color={settled ? '#00ff00' : '#ff0000'} 
         metalness={0.3}
@@ -137,14 +139,13 @@ function getDiceFaceRotation(face: number): [number, number, number] {
 
 // Table/ground plane
 function Table() {
-  const [ref] = usePlane(() => ({
+  const [ref] = usePlane<THREE.Mesh>(() => ({
     rotation: [-Math.PI / 2, 0, 0],
-    position: [0, -3, 0],
-    args: [20, 20],
+    position: [0, -2, 0],
   }));
 
   return (
-    <mesh ref={ref} receiveShadow>
+    <mesh ref={ref as any} receiveShadow>
       <planeGeometry args={[20, 20]} />
       <meshStandardMaterial color="#1a1a1a" />
     </mesh>

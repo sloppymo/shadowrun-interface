@@ -2,6 +2,18 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useUser } from '@clerk/nextjs';
 import axios from 'axios';
 
+interface Theme {
+  name: string;
+  background: string;
+  text: string;
+  secondaryText: string;
+  accent: string;
+  prompt: string;
+  input: string;
+  inputText: string;
+  secondaryBackground: string;
+}
+
 interface PendingResponse {
   id: string;
   user_id: string;
@@ -56,13 +68,14 @@ interface DmDashboardProps {
   sessionId: string;
   isVisible: boolean;
   onClose: () => void;
+  theme: Theme;
 }
 
 type TabType = 'pending' | 'notifications' | 'analytics';
 
 const API_BASE_URL = 'http://localhost:5000';
 
-export default function DmDashboard({ sessionId, isVisible, onClose }: DmDashboardProps) {
+export default function DmDashboard({ sessionId, isVisible, onClose, theme }: DmDashboardProps) {
   const { user } = useUser();
   const [pendingResponsesData, setPendingResponsesData] = useState<PendingResponsesData>({
     items: [],

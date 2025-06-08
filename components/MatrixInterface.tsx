@@ -474,8 +474,8 @@ export function MatrixInterface({ sessionId, userId, characterId }: { sessionId:
                       key={action.id}
                       onClick={() => executeAction(action, selectedNode)}
                       disabled={selectedNode.type === 'ice' && action.type !== 'crash'}
-                      className="w-full px-3 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 
-                               disabled:cursor-not-allowed text-black font-bold rounded text-sm transition-colors"
+                      className={`w-full px-3 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 
+                               disabled:cursor-not-allowed text-black font-bold rounded text-sm transition-colors`}
                     >
                       <span className="mr-2">{action.icon}</span>
                       {action.name}

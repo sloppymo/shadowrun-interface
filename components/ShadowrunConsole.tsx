@@ -1,23 +1,12 @@
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useUser } from '@clerk/nextjs';
 import DmDashboard from './DmDashboard';
 import ImageGallery from './ImageGallery';
 import axios from 'axios';
+import type { Theme } from './types';
 
 // Define types
 type ThemeName = 'shadowrunBarren' | 'matrix' | 'cyberpunk' | 'terminal';
-
-interface Theme {
-  name: string;
-  background: string;
-  text: string;
-  secondaryText: string;
-  accent: string;
-  prompt: string;
-  input: string;
-  inputText: string;
-  secondaryBackground: string;
-}
 
 interface HistoryItem {
   command: string;
@@ -31,8 +20,21 @@ interface UserSettings {
   fontSize: string;
 }
 
+interface Message {
+  id: string;
+  text: string;
+  type: 'user' | 'system' | 'error' | 'roll_result';
+  timestamp: Date;
+  result?: {
+    rolls: number[];
+    total: number;
+    glitch: boolean;
+    critical_glitch: boolean;
+  };
+}
+
 // Define themes
-const themes: Record<string, Theme> = {
+const themes: Record<ThemeName, Theme> = {
   shadowrunBarren: {
     name: 'Shadowrun Barren',
     background: 'bg-gray-950',
@@ -88,8 +90,13 @@ const fontSizes = [
   { id: 'xl', name: 'Extra Large', class: 'text-xl' }
 ];
 
-export default function ShadowrunConsole() {
+interface ShadowrunConsoleProps {
+  theme: Theme;
+}
+
+export default function ShadowrunConsole({ theme }: ShadowrunConsoleProps) {
   const { user, isSignedIn } = useUser();
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [prompt, setPrompt] = useState('> ');
@@ -99,14 +106,185 @@ export default function ShadowrunConsole() {
   const [showImageGallery, setShowImageGallery] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [isGameMaster, setIsGameMaster] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
   const inputRef = useRef<HTMLInputElement>(null);
   const consoleRef = useRef<HTMLDivElement>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isRolling, setIsRolling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   
   // Settings state with defaults
   const [settings, setSettings] = useState<UserSettings>({
     theme: 'shadowrunBarren',
     fontSize: 'base'
   });
+
+  const scrollToBottom = useCallback(() => {
+    if (messagesEndRef.current?.scrollIntoView) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, scrollToBottom]);
+
+  useEffect(() => {
+    const connectToEventSource = () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+
+      const eventSource = new EventSource('http://localhost:5000/events');
+      eventSourceRef.current = eventSource;
+
+      eventSource.onopen = () => {
+        setConnectionStatus('connected');
+        setError(null);
+        addSystemMessage('Connected to the Matrix');
+      };
+
+      eventSource.onerror = () => {
+        setConnectionStatus('error');
+        setError('Lost connection to the Matrix. Attempting to reconnect...');
+        eventSource.close();
+        setTimeout(connectToEventSource, 5000);
+      };
+
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          handleServerMessage(data);
+        } catch (err) {
+          setError('Error processing response from server');
+          console.error('Error parsing server message:', err);
+        }
+      };
+    };
+
+    connectToEventSource();
+
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+    };
+  }, []);
+
+  const addSystemMessage = (text: string) => {
+    setMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      text,
+      type: 'system',
+      timestamp: new Date()
+    }]);
+  };
+
+  const handleServerMessage = (data: any) => {
+    if (data.type === 'error') {
+      setError(data.message);
+      addSystemMessage(`Error: ${data.message}`);
+    } else if (data.type === 'roll_result') {
+      const { result } = data;
+      const message: Message = {
+        id: Date.now().toString(),
+        text: `Rolled ${result.total} (${result.rolls.join(', ')})`,
+        type: 'roll_result' as const,
+        timestamp: new Date(),
+        result
+      };
+      setMessages(prev => [...prev, message]);
+      setIsRolling(false);
+
+      // Announce result to screen readers
+      const announcement = document.createElement('div');
+      announcement.setAttribute('role', 'status');
+      announcement.setAttribute('aria-live', 'polite');
+      announcement.textContent = `Rolled ${result.total}${result.glitch ? ' with a glitch!' : ''}${result.critical_glitch ? ' Critical glitch!' : ''}`;
+      document.body.appendChild(announcement);
+      setTimeout(() => announcement.remove(), 5000);
+    }
+  };
+
+  const sanitizeCommand = (command: string): string => {
+    // Remove any potential command injection attempts
+    return command.split(';')[0].trim();
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim() || isProcessing) return;
+
+    const sanitizedInput = sanitizeCommand(input);
+    if (sanitizedInput !== input) {
+      addSystemMessage('Command sanitized for security');
+    }
+
+    const message: Message = {
+      id: Date.now().toString(),
+      text: sanitizedInput,
+      type: 'user',
+      timestamp: new Date()
+    };
+
+    setMessages(prev => [...prev, message]);
+    setInput('');
+
+    if (sanitizedInput.toLowerCase().startsWith('roll')) {
+      setIsRolling(true);
+      try {
+        const response = await fetch('http://localhost:5000/roll', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            command: sanitizedInput,
+            userId: user?.id
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to process roll');
+        }
+
+        const data = await response.json();
+        handleServerMessage(data);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to process roll');
+        setIsRolling(false);
+      }
+    }
+  };
+
+  const getMessageStyle = (message: Message) => {
+    const baseStyle = {
+      padding: '0.5rem',
+      margin: '0.5rem 0',
+      borderRadius: '0.25rem',
+      backgroundColor: theme.secondaryBackground,
+      color: theme.text
+    };
+
+    switch (message.type) {
+      case 'user':
+        return { ...baseStyle, backgroundColor: theme.accent };
+      case 'system':
+        return { ...baseStyle, color: theme.secondaryText };
+      case 'error':
+        return { ...baseStyle, backgroundColor: '#ff4444', color: 'white' };
+      case 'roll_result':
+        return {
+          ...baseStyle,
+          backgroundColor: message.result?.glitch ? '#ff4444' : theme.secondaryBackground,
+          color: message.result?.glitch ? 'white' : theme.text
+        };
+      default:
+        return baseStyle;
+    }
+  };
 
   // Load settings from localStorage on component mount
   useEffect(() => {
@@ -242,235 +420,172 @@ export default function ShadowrunConsole() {
     }
   };
 
-  // Handle form submission
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isProcessing) return;
-    
-    const command = input.trim();
-    setInput('');
-    
-    // Add command to history
-    addToHistory(command, '', true);
-    
-    // Process command
-    await handleCommand(command);
-  };
-
-  // Handle command logic
-  const handleCommand = async (cmd: string) => {
-    const command = cmd.toLowerCase();
-    setIsProcessing(true);
-    
-    try {
-      // Basic commands
-      if (command === 'clear') {
-        setHistory([]);
-        setIsProcessing(false);
-        return;
-      }
-      
-      if (command === 'help') {
-        addToHistory(
-          cmd, 
-          'Available commands:\n' +
-          '- clear: Clear the console\n' +
-          '- help: Show this help message\n' +
-          '- theme [name]: Change console theme (shadowrunBarren, matrix, cyberpunk, terminal)\n' +
-          '- settings: Open settings panel\n' +
-          '- /session create [name]: Create a new game session (GM only)\n' +
-          '- /session join [id]: Join an existing session\n' +
-          '- /dm dashboard: Open DM review dashboard (GM only)\n' +
-          '- /ai [message]: Request AI response with DM review\n' +
-          '- /image gallery: Open image generation gallery\n' +
-          '- /image generate [description]: Generate a scene image\n' +
-          '- /scene [description]: Set a new scene\n' +
-          '- /roll [dice]: Roll dice (e.g., /roll 3d6)\n' +
-          '- /summon [character]: Summon an NPC\n' +
-          '- /echo [message]: Display a message to all players',
-          false
-        );
-      }
-      
-      else if (command.startsWith('theme ')) {
-        const themeName = command.replace('theme ', '');
-        if (themes[themeName]) {
-          const newSettings = { ...settings, theme: themeName as ThemeName };
-          setSettings(newSettings);
-          addToHistory(cmd, `Theme changed to ${themes[themeName].name}`, false);
-        } else {
-          addToHistory(cmd, `Theme not found. Available themes: ${Object.keys(themes).join(', ')}`, false);
-        }
-      }
-      
-      else if (command === 'settings') {
-        setShowSettings(true);
-        addToHistory(cmd, 'Opening settings panel...', false);
-      }
-      
-      // DM Review System Commands
-      else if (command.startsWith('/session ')) {
-        await handleSessionCommand(cmd);
-      }
-      
-      else if (command === '/dm dashboard') {
-        if (!isGameMaster) {
-          addToHistory(cmd, 'Error: Only Game Masters can access the DM dashboard.', false);
-        } else if (!currentSessionId) {
-          addToHistory(cmd, 'Error: You must be in a session to access the DM dashboard.', false);
-        } else {
-          setShowDmDashboard(true);
-          addToHistory(cmd, 'Opening DM Review Dashboard...', false);
-        }
-      }
-      
-      else if (command.startsWith('/ai ')) {
-        await handleAiCommand(cmd);
-      }
-      
-      // Image generation commands
-      else if (command === '/image gallery') {
-        if (!currentSessionId) {
-          addToHistory(cmd, 'Error: You must be in a session to access the image gallery.', false);
-        } else {
-          setShowImageGallery(true);
-          addToHistory(cmd, 'Opening Scene Visualizer...', false);
-        }
-      }
-      
-      else if (command.startsWith('/image generate ')) {
-        const description = cmd.substring(16);
-        if (!currentSessionId) {
-          addToHistory(cmd, 'Error: You must be in a session to generate images.', false);
-        } else if (!description.trim()) {
-          addToHistory(cmd, 'Error: Please provide a scene description to generate.', false);
-        } else {
-          addToHistory(cmd, `Generating image for: "${description}"\nOpening Scene Visualizer...`, false);
-          setShowImageGallery(true);
-        }
-      }
-      
-      // Shadowrun specific commands
-      else if (command.startsWith('/scene ')) {
-        const sceneDescription = cmd.substring(7);
-        // In a real implementation, this would connect to your backend
-        addToHistory(cmd, `Setting scene: ${sceneDescription}\nThe GM is describing the scene...`, false);
-      }
-      
-      else if (command.startsWith('/roll ')) {
-        const diceNotation = cmd.substring(6);
-        // Simple dice roll simulation
-        addToHistory(cmd, `Rolling ${diceNotation}...\nResult: 14 (simulated roll)`, false);
-      }
-      
-      else {
-        // Default response for unknown commands
-        addToHistory(cmd, `Unknown command: ${cmd}\nType "help" for available commands.`, false);
-      }
-    } catch (error) {
-      console.error('Error processing command:', error);
-      addToHistory(cmd, `Error: ${error instanceof Error ? error.message : 'Unknown error processing command'}`, false);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
   const currentTheme = themes[settings.theme];
   const currentFontSize = fontSizes.find(fs => fs.id === settings.fontSize)?.class || 'text-base';
 
   return (
-    <div className={`min-h-screen flex flex-col ${currentTheme.background}`}>
-      {/* Console header */}
-      <header className="p-2 border-b border-red-900">
-        <div className="flex justify-between items-center">
-          <h1 className={`${currentTheme.prompt} font-mono font-bold`}>SHADOWRUN MATRIX INTERFACE</h1>
-          <div className="flex items-center gap-2">
-            <button 
-              onClick={() => setShowSettings(true)}
-              className={`px-3 py-1 rounded ${currentTheme.accent} hover:opacity-80`}
-            >
-              Settings
-            </button>
-          </div>
-        </div>
-      </header>
-      
-      {/* Main console area */}
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        backgroundColor: theme.background,
+        color: theme.text,
+        padding: '1rem',
+        borderRadius: '0.5rem',
+        fontFamily: 'monospace'
+      }}
+    >
+      {/* Connection Status */}
+      <div 
+        role="status" 
+        aria-live="polite"
+        className={`mb-4 p-2 rounded ${
+          connectionStatus === 'connected' ? 'bg-green-900 text-green-200' :
+          connectionStatus === 'error' ? 'bg-red-900 text-red-200' :
+          'bg-yellow-900 text-yellow-200'
+        }`}
+      >
+        {connectionStatus === 'connected' ? 'Connected to the Matrix' :
+         connectionStatus === 'error' ? 'Error connecting to the Matrix' :
+         'Connecting to the Matrix...'}
+      </div>
+
+      {/* Console Output */}
       <div 
         ref={consoleRef}
-        className={`flex-1 p-4 overflow-y-auto font-mono ${currentFontSize}`}
-        onClick={() => inputRef.current?.focus()}
+        className={`${themes[settings.theme].secondaryBackground} rounded-lg p-4 mb-4 h-[calc(100vh-12rem)] overflow-y-auto font-mono ${themes[settings.theme].text}`}
+        role="log"
+        aria-label="Console output"
       >
-        {history.map((item, i) => (
-          <div key={i} className="mb-4">
-            {item.command && (
-              <div className="flex">
-                <span className={`${currentTheme.prompt} mr-2`}>{prompt}</span>
-                <span className={currentTheme.text}>{item.command}</span>
+        {messages.map(message => (
+          <div
+            key={message.id}
+            style={getMessageStyle(message)}
+            role={message.type === 'roll_result' ? 'status' : undefined}
+            aria-live={message.type === 'roll_result' ? 'polite' : undefined}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>
+                {message.type === 'user' ? `${user?.firstName}: ` : ''}
+                {message.text}
+              </span>
+              <span style={{ color: themes[settings.theme].secondaryText }}>
+                {message.timestamp.toLocaleTimeString()}
+              </span>
+            </div>
+            {message.type === 'roll_result' && message.result && (
+              <div>
+                {message.result.glitch && (
+                  <div style={{ color: 'white', fontWeight: 'bold' }}>
+                    {message.result.critical_glitch ? 'Critical Glitch!' : 'Glitch!'}
+                  </div>
+                )}
+                <div style={{ fontSize: '0.8em', color: themes[settings.theme].secondaryText }}>
+                  Rolls: {message.result.rolls.join(', ')}
+                </div>
               </div>
             )}
-            <div className={`pl-4 whitespace-pre-wrap ${currentTheme.secondaryText}`}>
-              {item.output}
-              {item.isProcessing && (
-                <span className="streaming-cursor ml-1"></span>
-              )}
-            </div>
           </div>
         ))}
+        <div ref={messagesEndRef} />
       </div>
-      
-      {/* Input form */}
-      <form onSubmit={handleSubmit} className="p-2 border-t border-red-900">
-        <div className={`flex items-center ${currentTheme.input} p-2 rounded`}>
-          <span className={`${currentTheme.prompt} mr-2`}>{prompt}</span>
+
+      {/* Input Form */}
+      <form 
+        onSubmit={handleSubmit}
+        className="flex gap-2"
+        role="search"
+        aria-label="Console input"
+      >
+        <div className="flex-1 relative">
+          <span 
+            className={`absolute left-3 top-1/2 -translate-y-1/2 ${themes[settings.theme].prompt}`}
+            aria-hidden="true"
+          >
+            {prompt}
+          </span>
           <input
             ref={inputRef}
             type="text"
             value={input}
-            onChange={e => setInput(e.target.value)}
-            className={`flex-1 bg-transparent outline-none ${currentTheme.inputText}`}
-            disabled={isProcessing}
-            placeholder={isProcessing ? "Processing..." : "Type a command..."}
+            onChange={(e) => setInput(e.target.value)}
+            className={`w-full pl-8 pr-4 py-2 rounded ${themes[settings.theme].input} ${themes[settings.theme].inputText}`}
+            placeholder="Enter command..."
+            disabled={isProcessing || connectionStatus === 'error'}
+            aria-label="Command input"
+            aria-disabled={isProcessing || connectionStatus === 'error'}
           />
         </div>
+        <button
+          type="submit"
+          className={`px-4 py-2 rounded ${themes[settings.theme].accent}`}
+          disabled={isProcessing || connectionStatus === 'error'}
+          aria-label="Submit command"
+          aria-disabled={isProcessing || connectionStatus === 'error'}
+        >
+          SEND
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowSettings(true)}
+          className={`px-4 py-2 rounded ${themes[settings.theme].accent}`}
+          aria-label="Open settings"
+        >
+          SETTINGS
+        </button>
       </form>
-      
-      {/* Settings modal */}
+
+      {/* Settings Modal */}
       {showSettings && (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
-          <div className={`${currentTheme.secondaryBackground} p-6 rounded-lg max-w-md w-full`}>
-            <h2 className={`${currentTheme.prompt} text-xl font-bold mb-4`}>Console Settings</h2>
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center"
+          role="dialog"
+          aria-label="Console settings"
+          aria-modal="true"
+        >
+          <div className={`${themes[settings.theme].secondaryBackground} p-6 rounded-lg max-w-md w-full`}>
+            <h2 className={`text-xl font-bold mb-4 ${themes[settings.theme].text}`}>Console Settings</h2>
             
+            {/* Theme Selection */}
             <div className="mb-4">
-              <label className={`${currentTheme.text} block mb-2`}>Theme</label>
-              <select 
+              <label className={`block mb-2 ${themes[settings.theme].text}`}>
+                Theme
+              </label>
+              <select
                 value={settings.theme}
-                onChange={e => setSettings({...settings, theme: e.target.value as ThemeName})}
-                className="w-full p-2 bg-gray-800 text-white rounded"
+                onChange={(e) => setSettings(prev => ({ ...prev, theme: e.target.value as ThemeName }))}
+                className={`w-full p-2 rounded ${themes[settings.theme].input} ${themes[settings.theme].inputText}`}
+                aria-label="Select theme"
               >
-                {Object.entries(themes).map(([key, theme]) => (
-                  <option key={key} value={key}>{theme.name}</option>
+                {Object.entries(themes).map(([id, theme]) => (
+                  <option key={id} value={id}>{theme.name}</option>
                 ))}
               </select>
             </div>
-            
+
+            {/* Font Size Selection */}
             <div className="mb-4">
-              <label className={`${currentTheme.text} block mb-2`}>Font Size</label>
-              <select 
+              <label className={`block mb-2 ${themes[settings.theme].text}`}>
+                Font Size
+              </label>
+              <select
                 value={settings.fontSize}
-                onChange={e => setSettings({...settings, fontSize: e.target.value})}
-                className="w-full p-2 bg-gray-800 text-white rounded"
+                onChange={(e) => setSettings(prev => ({ ...prev, fontSize: e.target.value }))}
+                className={`w-full p-2 rounded ${themes[settings.theme].input} ${themes[settings.theme].inputText}`}
+                aria-label="Select font size"
               >
                 {fontSizes.map(size => (
                   <option key={size.id} value={size.id}>{size.name}</option>
                 ))}
               </select>
             </div>
-            
-            <div className="flex justify-end mt-6">
-              <button 
+
+            <div className="flex justify-end gap-2">
+              <button
                 onClick={() => setShowSettings(false)}
-                className={`px-4 py-2 rounded ${currentTheme.accent}`}
+                className={`px-4 py-2 rounded ${themes[settings.theme].accent}`}
+                aria-label="Close settings"
               >
                 Close
               </button>
@@ -478,22 +593,24 @@ export default function ShadowrunConsole() {
           </div>
         </div>
       )}
-      
+
       {/* DM Dashboard */}
       {showDmDashboard && currentSessionId && (
         <DmDashboard
           sessionId={currentSessionId}
-          isVisible={showDmDashboard}
           onClose={() => setShowDmDashboard(false)}
+          theme={theme}
+          isVisible={showDmDashboard}
         />
       )}
-      
+
       {/* Image Gallery */}
       {showImageGallery && currentSessionId && (
         <ImageGallery
           sessionId={currentSessionId}
-          isVisible={showImageGallery}
           onClose={() => setShowImageGallery(false)}
+          theme={theme}
+          isVisible={showImageGallery}
         />
       )}
     </div>
