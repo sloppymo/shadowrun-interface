@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useUser } from '@clerk/nextjs';
 import DmDashboard from './DmDashboard';
+import ImageGallery from './ImageGallery';
 import axios from 'axios';
 
 // Define types
@@ -95,6 +96,7 @@ export default function ShadowrunConsole() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showDmDashboard, setShowDmDashboard] = useState(false);
+  const [showImageGallery, setShowImageGallery] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [isGameMaster, setIsGameMaster] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -280,6 +282,8 @@ export default function ShadowrunConsole() {
           '- /session join [id]: Join an existing session\n' +
           '- /dm dashboard: Open DM review dashboard (GM only)\n' +
           '- /ai [message]: Request AI response with DM review\n' +
+          '- /image gallery: Open image generation gallery\n' +
+          '- /image generate [description]: Generate a scene image\n' +
           '- /scene [description]: Set a new scene\n' +
           '- /roll [dice]: Roll dice (e.g., /roll 3d6)\n' +
           '- /summon [character]: Summon an NPC\n' +
@@ -322,6 +326,28 @@ export default function ShadowrunConsole() {
       
       else if (command.startsWith('/ai ')) {
         await handleAiCommand(cmd);
+      }
+      
+      // Image generation commands
+      else if (command === '/image gallery') {
+        if (!currentSessionId) {
+          addToHistory(cmd, 'Error: You must be in a session to access the image gallery.', false);
+        } else {
+          setShowImageGallery(true);
+          addToHistory(cmd, 'Opening Scene Visualizer...', false);
+        }
+      }
+      
+      else if (command.startsWith('/image generate ')) {
+        const description = cmd.substring(16);
+        if (!currentSessionId) {
+          addToHistory(cmd, 'Error: You must be in a session to generate images.', false);
+        } else if (!description.trim()) {
+          addToHistory(cmd, 'Error: Please provide a scene description to generate.', false);
+        } else {
+          addToHistory(cmd, `Generating image for: "${description}"\nOpening Scene Visualizer...`, false);
+          setShowImageGallery(true);
+        }
       }
       
       // Shadowrun specific commands
@@ -459,6 +485,15 @@ export default function ShadowrunConsole() {
           sessionId={currentSessionId}
           isVisible={showDmDashboard}
           onClose={() => setShowDmDashboard(false)}
+        />
+      )}
+      
+      {/* Image Gallery */}
+      {showImageGallery && currentSessionId && (
+        <ImageGallery
+          sessionId={currentSessionId}
+          isVisible={showImageGallery}
+          onClose={() => setShowImageGallery(false)}
         />
       )}
     </div>
