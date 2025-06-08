@@ -1,37 +1,37 @@
 {
   "name": "shadowrun-interface",
-  "version": "0.89.0-beta",
+  "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
-    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\"",
-    "type-check": "tsc --noEmit"
+    "lint": "next lint"
   },
   "dependencies": {
-    "@clerk/nextjs": "^4.31.8",
-    "@tanstack/react-query": "^4.36.1",
-    "axios": "^1.6.2",
-    "next": "^14.2.25",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "typescript": "5.2.2",
-    "ws": "^8.14.2"
+    "@next/font": "13.4.19",
+    "@react-three/cannon": "^6.6.0",
+    "@react-three/drei": "^9.88.0",
+    "@react-three/fiber": "^8.15.0",
+    "@types/node": "20.5.9",
+    "@types/react": "18.2.21",
+    "@types/react-dom": "18.2.7",
+    "@types/three": "^0.158.0",
+    "axios": "^1.5.0",
+    "classnames": "^2.3.2",
+    "framer-motion": "^10.16.0",
+    "howler": "^2.2.4",
+    "next": "^15.3.3",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "three": "^0.159.0",
+    "typescript": "5.2.2"
   },
   "devDependencies": {
-    "@types/node": "20.9.0",
-    "@types/react": "18.2.37",
-    "@types/react-dom": "18.2.15",
-    "@types/ws": "^8.18.1",
-    "autoprefixer": "10.4.16",
-    "eslint": "^9.28.0",
-    "eslint-config-next": "^15.3.3",
-    "postcss": "8.4.31",
-    "tailwindcss": "3.3.5"
+    "autoprefixer": "^10.4.15",
+    "eslint": "8.48.0",
+    "eslint-config-next": "13.4.19",
+    "postcss": "^8.4.28",
+    "tailwindcss": "^3.3.3"
   }
 }
