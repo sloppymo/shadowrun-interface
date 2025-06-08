@@ -273,7 +273,7 @@ const AttributesStep: React.FC<AttributesStepProps> = ({
     <div className="text-green-300">
       <h2 className="text-xl text-green-400 mb-4">Attributes</h2>
       <p className="mb-6">
-        Distribute attribute points according to your character's strengths and weaknesses.
+        Distribute attribute points according to your character&apos;s strengths and weaknesses.
         <br />
         Points Available: <span className="text-green-500 font-bold">{availablePoints - spentPoints}</span> / {availablePoints}
       </p>

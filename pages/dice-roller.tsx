@@ -1,4 +1,5 @@
 import Head from 'next/head';
+import Link from 'next/link';
 import { SignedIn, SignedOut, RedirectToSignIn } from '@clerk/nextjs';
 import DiceRoller from '../components/DiceRoller';
 
@@ -25,12 +26,12 @@ export default function DiceRollerPage() {
             <DiceRoller />
 
             <footer className="mt-8 text-center">
-              <a 
+              <Link 
                 href="/enhanced-dashboard" 
                 className="bg-green-700 text-green-100 px-4 py-2 rounded hover:bg-green-600"
               >
                 ← Back to Dashboard
-              </a>
+              </Link>
             </footer>
           </div>
         </SignedIn>

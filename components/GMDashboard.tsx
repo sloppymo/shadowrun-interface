@@ -1829,7 +1829,7 @@ export default function GMDashboard({ sessionId, isVisible, onClose }: GMDashboa
                   <div className="mt-4 p-3 bg-gray-700 rounded">
                     <h5 className="text-emerald-400 font-medium mb-2">Generated NPC:</h5>
                     <div className="text-sm space-y-1">
-                      <div><span className="text-gray-400">Name:</span> Marcus "Wire" Chen</div>
+                      <div><span className="text-gray-400">Name:</span> Marcus &quot;Wire&quot; Chen</div>
                       <div><span className="text-gray-400">Role:</span> Street Decker</div>
                       <div><span className="text-gray-400">Motivation:</span> Seeking revenge against Renraku</div>
                       <div><span className="text-gray-400">Hook:</span> Has valuable corp data to trade</div>
@@ -2074,7 +2074,7 @@ export default function GMDashboard({ sessionId, isVisible, onClose }: GMDashboa
                 <h4 className="text-lg font-semibold text-cyan-300 mb-4">Recent Slack Activity</h4>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-gray-300">Scene pushed: "The Neon Market"</span>
+                    <span className="text-gray-300">Scene pushed: &quot;The Neon Market&quot;</span>
                     <span className="text-gray-500">2 minutes ago</span>
                   </div>
                   <div className="flex justify-between">

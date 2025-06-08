@@ -155,7 +155,7 @@ export default function DiceRoller() {
             type="text"
             value={diceInput}
             onChange={(e) => setDiceInput(e.target.value)}
-            placeholder="Enter dice command (e.g., '12', '3d6', 'init 8')..."
+            placeholder="Enter dice command (e.g., &apos;12&apos;, &apos;3d6&apos;, &apos;init 8&apos;)..."
             className="flex-1 p-3 bg-gray-800 border border-gray-600 rounded text-white font-mono"
             aria-label="Dice command input"
             disabled={isRolling}
@@ -170,7 +170,7 @@ export default function DiceRoller() {
           </button>
         </div>
         <div className="mt-2 text-sm text-gray-400">
-          Examples: "12" (SR dice), "12 limit 4" (with limit), "3d6+2" (standard), "init 8" (initiative)
+          Examples: &quot;12&quot; (SR dice), &quot;12 limit 4&quot; (with limit), &quot;3d6+2&quot; (standard), &quot;init 8&quot; (initiative)
         </div>
 
         {/* Edge Toggle */}
