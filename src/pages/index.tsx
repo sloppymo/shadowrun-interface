@@ -212,7 +212,7 @@ function Terminal({ sessionId, userId, role }: { sessionId: string; userId: stri
       <div className="h-72 overflow-y-auto mb-2 flex flex-col-reverse">
         <div>
           {lines.length === 0 && (
-            <div className="text-green-700 italic">Shadowrun Interface Terminal v2.0\nEnhanced with real-time collaboration and advanced dice mechanics\nType "help" for available commands.\nInitializing Matrix connection...</div>
+            <div className="text-green-700 italic">Shadowrun Interface Terminal v2.0\nEnhanced with real-time collaboration and advanced dice mechanics\nType &quot;help&quot; for available commands.\nInitializing Matrix connection...</div>
           )}
           {lines.map((l, i) => (
             <div key={i} className={

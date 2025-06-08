@@ -249,7 +249,7 @@ const BuildMethodStep: React.FC<BuildMethodStepProps> = ({
                     <li>Start with your character concept and background</li>
                     <li>Choose appropriate attributes, skills, gear based on the concept</li>
                     <li>Work with your GM to ensure balance</li>
-                    <li>Apply Core Traumas and Strengths that match the character's story</li>
+                    <li>Apply Core Traumas and Strengths that match the character&apos;s story</li>
                   </ul>
                 </div>
               )}

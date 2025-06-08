@@ -32,7 +32,7 @@ const SkillsStep: React.FC<SkillsStepProps> = ({
   const [spentPoints, setSpentPoints] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<SkillCategory>('combat');
 
-  // Initialize skills if they don't exist
+  // Initialize skills if they don&apos;t exist
   useEffect(() => {
     if (!character.skills || Object.keys(character.skills).length === 0) {
       // Initialize with all SR6E skills at rating 0

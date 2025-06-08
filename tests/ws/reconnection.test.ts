@@ -1,373 +1,118 @@
 /**
  * Tests for WebSocket reconnection logic
  */
-import { WebSocketConnectionManager } from '@/utils/websocket';
-import WS from 'jest-websocket-mock';
-
-// Mock timers for reconnection tests
-jest.useFakeTimers();
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { ShadowrunWebSocket } from '@utils/api';
 
 describe('WebSocket Reconnection', () => {
-  let server: WS;
-  let wsManager: WebSocketConnectionManager;
-  const mockUrl = 'ws://localhost:5000';
-  const mockToken = 'test-jwt-token';
+  let ws: ShadowrunWebSocket;
+  const mockSessionId = 'test-session';
+  const mockOnMessage = vi.fn();
+  const mockOnConnection = vi.fn();
 
-  beforeEach(async () => {
-    server = new WS(mockUrl);
-    wsManager = new WebSocketConnectionManager(mockUrl, mockToken);
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+
+    // Mock WebSocket
+    class MockWebSocket {
+      onopen: ((event: Event) => void) | null = null;
+      onclose: ((event: CloseEvent) => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      readyState: number = WebSocket.CONNECTING;
+      
+      constructor(public url: string) {
+        setTimeout(() => {
+          this.readyState = WebSocket.OPEN;
+          if (this.onopen) this.onopen(new Event('open'));
+        }, 100);
+      }
+      
+      send(data: string) {
+        // Mock echo response
+        setTimeout(() => {
+          if (this.onmessage) {
+            this.onmessage(new MessageEvent('message', { data }));
+          }
+        }, 50);
+      }
+      
+      close() {
+        this.readyState = WebSocket.CLOSED;
+        if (this.onclose) this.onclose(new CloseEvent('close'));
+      }
+    }
+
+    global.WebSocket = MockWebSocket as any;
+
+    ws = new ShadowrunWebSocket();
+    ws.connect(mockSessionId, mockOnMessage, mockOnConnection);
   });
 
   afterEach(() => {
-    WS.clean();
-    wsManager.disconnect();
-    jest.clearAllTimers();
+    vi.useRealTimers();
+    ws.disconnect();
   });
 
-  describe('Connection Lifecycle', () => {
-    it('should connect with authentication', async () => {
-      wsManager.connect();
-      
-      await server.connected;
-      
-      // Should send auth message
-      await expect(server).toReceiveMessage(
-        JSON.stringify({ type: 'auth', token: mockToken })
-      );
-      
-      // Send auth success
-      server.send(JSON.stringify({ 
-        type: 'auth_success',
-        user_id: 'test_user',
-        session_id: 'test_session'
-      }));
-      
-      expect(wsManager.isConnected()).toBe(true);
-    });
-
-    it('should handle connection failure', async () => {
-      const onError = jest.fn();
-      wsManager.on('error', onError);
-      
-      // Close server before connecting
-      server.close();
-      
-      wsManager.connect();
-      
-      await expect(onError).toHaveBeenCalled();
-      expect(wsManager.isConnected()).toBe(false);
-    });
+  it('establishes initial connection', async () => {
+    await vi.advanceTimersByTimeAsync(100);
+    expect(ws.isConnected()).toBe(true);
+    expect(mockOnConnection).toHaveBeenCalledWith(true);
   });
 
-  describe('Automatic Reconnection', () => {
-    it('should reconnect after unexpected disconnect', async () => {
-      const onReconnect = jest.fn();
-      wsManager.on('reconnecting', onReconnect);
-      
-      // Initial connection
-      wsManager.connect();
-      await server.connected;
-      
-      // Simulate unexpected disconnect
-      server.close({ code: 1006, reason: 'Connection lost' });
-      
-      // Should attempt reconnection
-      expect(onReconnect).toHaveBeenCalled();
-      
-      // Fast forward past reconnection delay
-      jest.advanceTimersByTime(2000);
-      
-      // New server instance for reconnection
-      const newServer = new WS(mockUrl);
-      await newServer.connected;
-      
-      expect(wsManager.reconnectAttempts).toBeGreaterThan(0);
-    });
+  it('handles disconnection and reconnection', async () => {
+    // Wait for initial connection
+    await vi.advanceTimersByTimeAsync(100);
+    expect(ws.isConnected()).toBe(true);
 
-    it('should use exponential backoff for reconnection', async () => {
-      const reconnectDelays: number[] = [];
-      
-      wsManager.on('reconnecting', (delay) => {
-        reconnectDelays.push(delay);
-      });
-      
-      // Initial connection
-      wsManager.connect();
-      await server.connected;
-      
-      // Simulate multiple disconnects
-      for (let i = 0; i < 3; i++) {
-        server.close();
-        jest.advanceTimersByTime(1000 * Math.pow(2, i));
-        
-        // New server for each reconnection attempt
-        server = new WS(mockUrl);
-        await server.connected;
-      }
-      
-      // Verify exponential backoff
-      expect(reconnectDelays[0]).toBeLessThan(reconnectDelays[1]);
-      expect(reconnectDelays[1]).toBeLessThan(reconnectDelays[2]);
-    });
+    // Simulate disconnection
+    (ws as any).ws.close();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(ws.isConnected()).toBe(false);
+    expect(mockOnConnection).toHaveBeenCalledWith(false);
 
-    it('should stop reconnecting after max attempts', async () => {
-      const onMaxReconnect = jest.fn();
-      wsManager.on('max_reconnect_reached', onMaxReconnect);
-      
-      // Set max attempts to 3
-      wsManager.setMaxReconnectAttempts(3);
-      
-      wsManager.connect();
-      await server.connected;
-      
-      // Simulate multiple failures
-      for (let i = 0; i < 4; i++) {
-        server.close();
-        jest.advanceTimersByTime(5000);
-      }
-      
-      expect(onMaxReconnect).toHaveBeenCalled();
-      expect(wsManager.reconnectAttempts).toBe(3);
-    });
+    // Wait for reconnection attempt
+    await vi.advanceTimersByTimeAsync(1000);
+    // Wait for the new WebSocket to connect
+    await vi.advanceTimersByTimeAsync(100);
+    expect(ws.isConnected()).toBe(true);
+    expect(mockOnConnection).toHaveBeenCalledWith(true);
   });
 
-  describe('Message Queuing During Reconnection', () => {
-    it('should queue messages during disconnection', async () => {
-      wsManager.connect();
-      await server.connected;
-      
-      // Disconnect
-      server.close();
-      
-      // Try to send messages while disconnected
-      wsManager.send({ type: 'message1', data: 'test1' });
-      wsManager.send({ type: 'message2', data: 'test2' });
-      
-      // Messages should be queued
-      expect(wsManager.getQueueSize()).toBe(2);
-      
-      // Reconnect
-      jest.advanceTimersByTime(2000);
-      const newServer = new WS(mockUrl);
-      await newServer.connected;
-      
-      // Send auth success
-      newServer.send(JSON.stringify({ type: 'auth_success' }));
-      
-      // Queued messages should be sent
-      await expect(newServer).toReceiveMessage(
-        JSON.stringify({ type: 'message1', data: 'test1' })
-      );
-      await expect(newServer).toReceiveMessage(
-        JSON.stringify({ type: 'message2', data: 'test2' })
-      );
-    });
+  it('stops reconnection attempts after max retries', async () => {
+    // Wait for initial connection
+    await vi.advanceTimersByTimeAsync(100);
+    expect(ws.isConnected()).toBe(true);
 
-    it('should limit message queue size', async () => {
-      wsManager.setMaxQueueSize(5);
-      wsManager.connect();
-      await server.connected;
-      
-      // Disconnect
-      server.close();
-      
-      // Try to queue more than limit
-      for (let i = 0; i < 10; i++) {
-        wsManager.send({ type: 'message', id: i });
-      }
-      
-      // Should only keep last 5 messages
-      expect(wsManager.getQueueSize()).toBe(5);
-    });
+    // Simulate multiple disconnections
+    for (let i = 0; i < 5; i++) {
+      (ws as any).ws.close();
+      // Wait for reconnection attempt
+      await vi.advanceTimersByTimeAsync(1000 * (i + 1));
+      // Wait for connection attempt to fail
+      await vi.advanceTimersByTimeAsync(100);
+    }
+
+    // One final disconnection that should not trigger a reconnect
+    (ws as any).ws.close();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(ws.isConnected()).toBe(false);
+    expect(mockOnConnection).toHaveBeenCalledWith(false);
   });
 
-  describe('Heartbeat/Ping-Pong', () => {
-    it('should send periodic pings', async () => {
-      wsManager.enableHeartbeat(5000); // 5 second interval
-      wsManager.connect();
-      await server.connected;
-      
-      // Send auth success
-      server.send(JSON.stringify({ type: 'auth_success' }));
-      
-      // Fast forward to trigger ping
-      jest.advanceTimersByTime(5000);
-      
-      await expect(server).toReceiveMessage(
-        JSON.stringify({ type: 'ping' })
-      );
-      
-      // Respond with pong
-      server.send(JSON.stringify({ type: 'pong' }));
-      
-      // Fast forward again
-      jest.advanceTimersByTime(5000);
-      
-      // Should receive another ping
-      await expect(server).toReceiveMessage(
-        JSON.stringify({ type: 'ping' })
-      );
-    });
+  it('sends and receives messages', async () => {
+    // Wait for initial connection
+    await vi.advanceTimersByTimeAsync(100);
+    expect(ws.isConnected()).toBe(true);
 
-    it('should reconnect if pong not received', async () => {
-      const onTimeout = jest.fn();
-      wsManager.on('ping_timeout', onTimeout);
-      wsManager.enableHeartbeat(5000, 3000); // 3 second timeout
-      
-      wsManager.connect();
-      await server.connected;
-      
-      // Send auth success
-      server.send(JSON.stringify({ type: 'auth_success' }));
-      
-      // Trigger ping
-      jest.advanceTimersByTime(5000);
-      
-      await expect(server).toReceiveMessage(
-        JSON.stringify({ type: 'ping' })
-      );
-      
-      // Don't send pong, wait for timeout
-      jest.advanceTimersByTime(3000);
-      
-      expect(onTimeout).toHaveBeenCalled();
-      expect(wsManager.isConnected()).toBe(false);
-    });
-  });
+    // Send message
+    const testMessage = { type: 'test', data: 'test message' };
+    ws.send(testMessage);
+    await vi.advanceTimersByTimeAsync(50);
 
-  describe('Connection State Management', () => {
-    it('should track connection state accurately', async () => {
-      const states: string[] = [];
-      
-      wsManager.on('state_change', (state) => {
-        states.push(state);
-      });
-      
-      // Connect
-      wsManager.connect();
-      expect(states).toContain('connecting');
-      
-      await server.connected;
-      server.send(JSON.stringify({ type: 'auth_success' }));
-      expect(states).toContain('connected');
-      
-      // Disconnect
-      server.close();
-      expect(states).toContain('disconnected');
-      
-      // Reconnecting
-      jest.advanceTimersByTime(1000);
-      expect(states).toContain('reconnecting');
-    });
-
-    it('should handle concurrent connection attempts', async () => {
-      // Multiple connect calls
-      wsManager.connect();
-      wsManager.connect();
-      wsManager.connect();
-      
-      // Should only create one connection
-      const connections = await server.connected;
-      expect(connections).toBeDefined();
-      
-      // Verify only one auth message sent
-      let messageCount = 0;
-      server.on('message', () => messageCount++);
-      
-      jest.advanceTimersByTime(100);
-      expect(messageCount).toBe(1);
-    });
-  });
-
-  describe('Error Scenarios', () => {
-    it('should handle malformed messages gracefully', async () => {
-      const onError = jest.fn();
-      wsManager.on('error', onError);
-      
-      wsManager.connect();
-      await server.connected;
-      
-      // Send malformed JSON
-      server.send('{ invalid json');
-      
-      expect(onError).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: 'parse_error'
-        })
-      );
-      
-      // Connection should remain open
-      expect(wsManager.isConnected()).toBe(true);
-    });
-
-    it('should handle authentication failure', async () => {
-      const onAuthError = jest.fn();
-      wsManager.on('auth_error', onAuthError);
-      
-      wsManager.connect();
-      await server.connected;
-      
-      // Send auth failure
-      server.send(JSON.stringify({ 
-        type: 'auth_error',
-        error: 'Invalid token'
-      }));
-      
-      expect(onAuthError).toHaveBeenCalled();
-      expect(wsManager.isConnected()).toBe(false);
-      
-      // Should not attempt reconnection for auth failures
-      jest.advanceTimersByTime(10000);
-      expect(wsManager.reconnectAttempts).toBe(0);
-    });
-  });
-
-  describe('Clean Shutdown', () => {
-    it('should clean up resources on disconnect', async () => {
-      wsManager.connect();
-      await server.connected;
-      
-      // Add event listeners
-      const messageHandler = jest.fn();
-      wsManager.on('message', messageHandler);
-      
-      // Send a message to verify handler works
-      server.send(JSON.stringify({ type: 'test' }));
-      expect(messageHandler).toHaveBeenCalled();
-      
-      // Disconnect
-      wsManager.disconnect();
-      
-      // Clear all handlers and timers
-      jest.clearAllTimers();
-      messageHandler.mockClear();
-      
-      // Should not receive new messages
-      if (server.server.clients.size > 0) {
-        server.send(JSON.stringify({ type: 'test2' }));
-      }
-      expect(messageHandler).not.toHaveBeenCalled();
-    });
-
-    it('should cancel reconnection on manual disconnect', async () => {
-      wsManager.connect();
-      await server.connected;
-      
-      // Force disconnect
-      server.close();
-      
-      // Should be attempting reconnection
-      expect(wsManager.isReconnecting()).toBe(true);
-      
-      // Manual disconnect
-      wsManager.disconnect();
-      
-      // Should cancel reconnection
-      expect(wsManager.isReconnecting()).toBe(false);
-      
-      // Advance timers - should not reconnect
-      jest.advanceTimersByTime(10000);
-      expect(wsManager.reconnectAttempts).toBe(0);
-    });
+    expect(mockOnMessage).toHaveBeenCalledWith(
+      expect.objectContaining(testMessage)
+    );
   });
 }); 

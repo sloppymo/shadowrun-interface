@@ -161,7 +161,7 @@ export default function CharacterCreation({ sessionId, userId, onComplete }: Cha
           <h3 className="text-lg font-bold mb-4">{steps[step].title}</h3>
           <p className="mb-2">This step is coming soon!</p>
           <p className="text-sm text-green-600">
-            We're actively developing the {steps[step].title.toLowerCase()} step component.
+            We&apos;re actively developing the {steps[step].title.toLowerCase()} step component.
             You can continue with character creation using the navigation buttons below.
           </p>
         </div>

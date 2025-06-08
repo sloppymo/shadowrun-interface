@@ -109,7 +109,7 @@ export default function CharacterDemo() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <div>
             <h2 className="text-xl text-red-400 mb-4 border-b border-red-900 pb-2">Core Traumas</h2>
-            <p className="text-green-400 mb-4">Select 1-2 Core Traumas that define your character's struggles. These will have both narrative and mechanical effects in-game.</p>
+            <p className="text-green-400 mb-4">Select 1-2 Core Traumas that define your character&apos;s struggles. These will have both narrative and mechanical effects in-game.</p>
             
             {sampleTraumas.map(trauma => (
               <CoreTraumaComponent
@@ -130,7 +130,7 @@ export default function CharacterDemo() {
           
           <div>
             <h2 className="text-xl text-cyan-400 mb-4 border-b border-cyan-900 pb-2">Core Strengths</h2>
-            <p className="text-green-400 mb-4">Select 1-2 Core Strengths that highlight your character's unique capabilities. These provide mechanical advantages in specific situations.</p>
+            <p className="text-green-400 mb-4">Select 1-2 Core Strengths that highlight your character&apos;s unique capabilities. These provide mechanical advantages in specific situations.</p>
             
             {sampleStrengths.map(strength => (
               <CoreStrengthComponent
