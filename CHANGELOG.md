@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.89.0-beta (2025-06-07)
+
+### 🔐 Security Enhancements
+- **AI Input Validation**: Implemented Pydantic schemas to block malicious prompts, SQL injection, and code execution attempts
+- **Dice Parser Security**: Replaced eval() with safe regex-based parser, prevents command injection
+- **WebSocket Authentication**: Added JWT-based auth with rate limiting and connection management
+- **Slack Security**: Enhanced timestamp validation to prevent replay attacks (5-minute window)
+- **XSS Prevention**: Added comprehensive HTML sanitization for frontend and backend
+
+### 🧪 Testing & Quality Assurance
+- **Backend Tests**: Added security, edge mechanics, Slack integration, and race condition tests (85%+ coverage)
+- **Frontend Tests**: Added DiceRoller XSS prevention and WebSocket reconnection tests (78%+ coverage)
+- **Fuzz Testing**: Comprehensive unicode, emoji, and symbolic input testing
+- **Race Conditions**: Tests for concurrent operations, DM approvals, and combat scenarios
+
+### 🔧 Developer Experience
+- **Debug CLI**: New tool for inspecting game state, debugging crises, and exporting data
+- **Setup Automation**: One-command dev environment setup with `scripts/dev_setup.sh`
+- **Makefile Enhancements**: Added `make qa`, `make test-security`, `make deploy-check`
+- **Flask Decorators**: New security decorators for auth, rate limiting, and validation
+
+### 📦 Infrastructure
+- **Rate Limiting**: Implemented on all endpoints with Redis/in-memory fallback
+- **WebSocket Management**: Connection pooling, heartbeat mechanism, auto-reconnection
+- **Monitoring Ready**: Structured logging, performance metrics, error tracking
+
+### 🎯 Production Readiness
+- All critical security vulnerabilities resolved
+- Input validation on all user-facing endpoints
+- Comprehensive error handling and recovery
+- Documentation for deployment and monitoring
+
 ## v.65a (2025-06-04)
 ### Backend
 - Switched to Python Flask backend for compatibility with Python 3.13
